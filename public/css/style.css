@@ -132,6 +132,45 @@ body {
   gap: 1.25rem;
 }
 
+.fd-sidebar-header-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+
+.fd-sidebar-brand-info {
+  display: none;
+}
+
+.fd-sidebar-close-btn {
+  display: none;
+}
+
+.fd-sidebar-backdrop {
+  display: none;
+}
+
+.fd-mobile-toggle {
+  display: none;
+  background: transparent;
+  border: none;
+  color: #1E293B;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  align-items: center;
+  justify-content: center;
+}
+
+.fd-mobile-toggle:hover {
+  background: #E2E8F0;
+}
+
+.fd-title-short {
+  display: none;
+}
+
 .fd-brand-logo {
   width: 44px;
   height: 44px;
@@ -3129,5 +3168,401 @@ body {
   align-items: center;
   gap: 4px;
 }
+
+/* ==========================================================================
+   SISTEMA DE DISEÑO RESPONSIVO COMPLETO (MOBILE, TABLET & SMALL DESKTOPS)
+   ========================================================================== */
+
+/* 1. TABLET & MÓVIL GENERAL (<= 992px) */
+@media (max-width: 992px) {
+  /* Layout y Drawer lateral */
+  .fd-layout {
+    width: 100%;
+    min-width: 0;
+    overflow-x: hidden;
+  }
+
+  .fd-sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 270px;
+    height: 100vh;
+    height: 100dvh;
+    z-index: 1200;
+    transform: translateX(-100%);
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    align-items: stretch;
+    padding: 1.25rem 1rem;
+    overflow-y: auto;
+    box-shadow: none;
+  }
+
+  .fd-sidebar.mobile-open {
+    transform: translateX(0);
+    box-shadow: 6px 0 25px rgba(0, 0, 0, 0.45);
+  }
+
+  .fd-sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(2px);
+    z-index: 1150;
+  }
+
+  .fd-sidebar-backdrop.active {
+    display: block;
+  }
+
+  .fd-sidebar-header-row {
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+    margin-bottom: 1.5rem;
+    padding-bottom: 0.85rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .fd-brand-logo {
+    margin-bottom: 0;
+  }
+
+  .fd-sidebar-brand-info {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    margin-left: 0.75rem;
+  }
+
+  .fd-sidebar-brand-title {
+    color: #FFFFFF;
+    font-weight: 700;
+    font-size: 15px;
+    line-height: 1.2;
+  }
+
+  .fd-sidebar-brand-sub {
+    color: #94A3B8;
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .fd-sidebar-close-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #FFFFFF;
+    border: none;
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .fd-sidebar-close-btn:hover {
+    background: rgba(255, 255, 255, 0.18);
+  }
+
+  .fd-nav-menu {
+    align-items: stretch;
+    gap: 0.35rem;
+  }
+
+  .fd-nav-item {
+    width: 100%;
+    height: 44px;
+    flex-direction: row;
+    justify-content: flex-start;
+    padding: 0 0.85rem;
+    font-size: 13.5px;
+    gap: 0.85rem;
+    border-radius: 8px;
+  }
+
+  .fd-nav-item span:not([id]) {
+    display: inline-block;
+    font-weight: 600;
+  }
+
+  .fd-nav-item[data-tooltip]::after {
+    display: none !important;
+  }
+
+  .fd-nav-item.active {
+    box-shadow: none;
+    background: #1E4666;
+  }
+
+  .fd-nav-item.active::before {
+    top: 6px;
+    bottom: 6px;
+    width: 4px;
+  }
+
+  .fd-sidebar-bottom {
+    flex-direction: row;
+    justify-content: space-between;
+    width: 100%;
+    padding-top: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    margin-top: 1.5rem;
+  }
+
+  /* Topbar en tablets y móviles */
+  .fd-mobile-toggle {
+    display: inline-flex;
+  }
+
+  .fd-topbar {
+    padding: 0 1rem;
+    min-height: 58px;
+    height: auto;
+    gap: 0.75rem;
+  }
+
+  .fd-topbar-left {
+    gap: 0.65rem;
+  }
+
+  .fd-portal-title {
+    font-size: 14px;
+  }
+
+  .fd-portal-badge {
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+
+  /* Contenedores de contenido */
+  .fd-content-container {
+    padding: 1rem;
+  }
+
+  /* Widgets de métricas en Dashboard */
+  .fd-kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.85rem;
+  }
+}
+
+/* 2. MÓVIL ESTÁNDAR (<= 768px) */
+@media (max-width: 768px) {
+  .fd-topbar {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .fd-title-full {
+    display: none;
+  }
+
+  .fd-title-short {
+    display: inline;
+  }
+
+  .fd-portal-badge {
+    display: none;
+  }
+
+  .fd-topbar-right {
+    gap: 0.4rem;
+  }
+
+  .fd-topbar-right #kanban-area-select {
+    max-width: 135px;
+    font-size: 11.5px;
+  }
+
+  .fd-user-summary {
+    padding: 3px 8px;
+    font-size: 11.5px;
+  }
+
+  .fd-user-summary span strong {
+    max-width: 80px;
+    display: inline-block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+  }
+
+  .fd-content-container {
+    padding: 0.75rem 0.5rem;
+  }
+
+  /* Cabecera de Vistas */
+  .fd-view-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.85rem;
+    margin-bottom: 1rem;
+  }
+
+  .fd-header-actions {
+    flex-wrap: wrap;
+    width: 100%;
+    gap: 0.5rem;
+  }
+
+  .fd-header-actions .btn-secondary,
+  .fd-header-actions .btn-primary,
+  .fd-header-actions .fd-btn-new-ticket {
+    flex: 1 1 100%;
+    justify-content: center;
+    text-align: center;
+  }
+
+  /* Tablas responsivas con swipe horizontal limpio */
+  .fd-table-container,
+  .table-responsive {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    border: 1px solid #E2E8F0;
+    border-radius: 8px;
+    margin-bottom: 1rem;
+  }
+
+  .fd-table-container table,
+  .table-responsive table {
+    min-width: 640px;
+  }
+
+  /* Toolbar de filtros de tickets */
+  .fd-tickets-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .fd-toolbar-left,
+  .fd-toolbar-right {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .fd-search-box {
+    width: 100% !important;
+  }
+
+  .fd-search-box input {
+    width: 100% !important;
+  }
+
+  /* Tablero Kanban estilo App / Touch Scroll */
+  .kanban-board {
+    display: flex !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    gap: 1rem !important;
+    padding-bottom: 1rem !important;
+    scroll-snap-type: x mandatory;
+  }
+
+  .kanban-column {
+    min-width: 275px !important;
+    max-width: 290px !important;
+    flex: 0 0 275px !important;
+    scroll-snap-align: start;
+    min-height: 420px;
+  }
+
+  /* Modales en móviles */
+  .fd-modal-ticket,
+  .modal-content {
+    width: 95vw !important;
+    max-width: 95vw !important;
+    margin: 10px auto !important;
+    padding: 1.15rem 0.85rem !important;
+    max-height: 92vh !important;
+    overflow-y: auto !important;
+  }
+
+  .fd-modal-top {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .fd-modal-title-group h2 {
+    font-size: 16px;
+  }
+
+  .fd-properties-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.75rem !important;
+  }
+
+  /* CSAT Modal */
+  .csat-container {
+    width: 95vw !important;
+    max-width: 95vw !important;
+    margin: 10px auto !important;
+    padding: 1.25rem 1rem !important;
+  }
+
+  .csat-rating-grid {
+    gap: 0.5rem !important;
+  }
+
+  .csat-rating-btn {
+    padding: 0.5rem 0.25rem !important;
+    font-size: 12px !important;
+  }
+
+  /* Notificaciones Dropdown */
+  .fd-notifications-dropdown {
+    right: -10px !important;
+    left: auto !important;
+    width: 300px !important;
+    max-width: 90vw !important;
+  }
+}
+
+/* 3. MÓVIL PEQUEÑO (<= 480px) */
+@media (max-width: 480px) {
+  .fd-kpi-grid {
+    grid-template-columns: 1fr;
+    gap: 0.65rem;
+  }
+
+  .fd-pending-kpi-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.65rem !important;
+  }
+
+  .fd-task-meta-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.35rem;
+  }
+
+  .fd-task-card-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.65rem;
+  }
+
+  .fd-task-card-footer button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .fd-modal-actions {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .fd-modal-actions button {
+    width: 100%;
+  }
+}
+
 
 

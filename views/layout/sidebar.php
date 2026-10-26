@@ -1,8 +1,14 @@
-<!-- FRESHDESK LEFT VERTICAL SIDEBAR -->
-    <aside class="fd-sidebar">
+    <aside class="fd-sidebar" id="app-sidebar">
         <div class="fd-sidebar-top">
-            <div class="fd-brand-logo" title="Kaizen ServiceDesk" onclick="switchNavTab('dashboard-tab')">
-                K
+            <div class="fd-sidebar-header-row">
+                <div class="fd-brand-logo" title="Kaizen ServiceDesk" onclick="switchNavTab('dashboard-tab')">
+                    K
+                </div>
+                <div class="fd-sidebar-brand-info">
+                    <span class="fd-sidebar-brand-title">Kaizen Desk</span>
+                    <span class="fd-sidebar-brand-sub">Soporte TI & SSGG</span>
+                </div>
+                <button type="button" class="fd-sidebar-close-btn" onclick="closeMobileSidebar()" aria-label="Cerrar menú">&times;</button>
             </div>
 
             <nav class="fd-nav-menu">
@@ -98,3 +104,5 @@
             </button>
         </div>
     </aside>
+    <!-- BACKDROP PARA MÓVILES -->
+    <div id="fd-sidebar-backdrop" class="fd-sidebar-backdrop" onclick="closeMobileSidebar()"></div>

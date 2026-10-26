@@ -567,8 +567,25 @@
     }
     window.updateUrlState = updateUrlState;
 
+    function toggleMobileSidebar() {
+        const sidebar = document.getElementById('app-sidebar');
+        const backdrop = document.getElementById('fd-sidebar-backdrop');
+        if (sidebar) sidebar.classList.toggle('mobile-open');
+        if (backdrop) backdrop.classList.toggle('active');
+    }
+    window.toggleMobileSidebar = toggleMobileSidebar;
+
+    function closeMobileSidebar() {
+        const sidebar = document.getElementById('app-sidebar');
+        const backdrop = document.getElementById('fd-sidebar-backdrop');
+        if (sidebar) sidebar.classList.remove('mobile-open');
+        if (backdrop) backdrop.classList.remove('active');
+    }
+    window.closeMobileSidebar = closeMobileSidebar;
+
     function switchNavTab(tabId, updateUrl = true) {
         if (!tabId) tabId = 'dashboard-tab';
+        closeMobileSidebar();
         const tabs = document.querySelectorAll('.nav-tab');
         const contents = document.querySelectorAll('.tab-content');
 

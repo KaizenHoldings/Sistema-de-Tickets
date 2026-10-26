@@ -1,11 +1,20 @@
-<!-- TOP BAR FRESHDESK -->
         <header class="fd-topbar">
             <div class="fd-topbar-left">
+                <!-- BOTÓN HAMBURGUESA PARA DISPOSITIVOS MÓVILES -->
+                <button type="button" id="mobile-menu-toggle" class="fd-mobile-toggle" onclick="toggleMobileSidebar()" aria-label="Abrir Menú de Navegación">
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="3" y1="12" x2="21" y2="12"></line>
+                        <line x1="3" y1="6" x2="21" y2="6"></line>
+                        <line x1="3" y1="18" x2="21" y2="18"></line>
+                    </svg>
+                </button>
+
                 <span class="fd-portal-title">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2">
                         <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
                     </svg>
-                    Servicio de asistencia técnica : Kaizen
+                    <span class="fd-title-full">Servicio de asistencia técnica : Kaizen</span>
+                    <span class="fd-title-short">Kaizen Desk</span>
                 </span>
                 <?php
                 $activeAreaBadge = 'General';
