@@ -18,6 +18,9 @@ class AuthController {
      */
     public function login(string $email, string $password): array {
         try {
+            // Asegurar que el superadministrador configurado en .env exista y esté sincronizado
+            UserController::ensureSuperAdminExists();
+
             $email = strtolower(trim($email));
             if (empty($email) || empty($password)) {
                 return ['success' => false, 'message' => 'Ingrese correo y contraseña.'];

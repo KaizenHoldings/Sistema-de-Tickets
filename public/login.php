@@ -1,10 +1,23 @@
 <?php
+header('Content-Type: text/html; charset=UTF-8');
+mb_internal_encoding('UTF-8');
+ini_set('default_charset', 'UTF-8');
+
 session_start();
 
 if (isset($_SESSION['user'])) {
     header('Location: index.php');
     exit;
 }
+
+require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../src/Controllers/UserController.php';
+
+// Asegurar superadmin desde variables de entorno
+\Controllers\UserController::ensureSuperAdminExists();
+
+$superAdminEmail = \Config\Env::get('SUPERADMIN_EMAIL', 'superadmin@empresa.com');
+$superAdminPass = \Config\Env::get('SUPERADMIN_PASSWORD', 'password123');
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -12,7 +25,7 @@ if (isset($_SESSION['user'])) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Iniciar Sesión - Servicio de asistencia técnica : Kaizen</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/style.css?v=<?= filemtime(__DIR__ . '/css/style.css') ?>">
     <style>
         body {
             display: flex;
@@ -112,22 +125,32 @@ if (isset($_SESSION['user'])) {
 
         <!-- ACCESO RÁPIDO PARA VALIDACIÓN DE ROLES (QA) -->
         <div class="demo-roles">
-            <h4 style="font-size: 0.78rem; color: #64748B; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing:0.5px; font-weight:700;">
-                🔑 Acceso Rápido por Perfil (3 Roles Oficiales):
+            <h4 style="font-size: 0.78rem; color: #64748B; margin-bottom: 0.75rem; text-transform: uppercase; letter-spacing:0.5px; font-weight:700; display:flex; align-items:center; gap:0.4rem;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                Acceso Rápido por Perfil (3 Roles Oficiales):
             </h4>
 
-            <button class="demo-btn" onclick="quickLogin('superadmin@empresa.com')">
-                <span>👑 <strong>Superadministrador</strong> (Acceso total & ajustes de todas las áreas)</span>
+            <button class="demo-btn" onclick="quickLogin('<?= htmlspecialchars($superAdminEmail) ?>', '<?= htmlspecialchars($superAdminPass) ?>')">
+                <span style="display:flex; align-items:center; gap:0.45rem;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D97706" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+                    <strong>Superadministrador</strong> (Acceso total & ajustes de todas las áreas)
+                </span>
                 <small style="color:#2563EB; font-weight:600;">Entrar &rarr;</small>
             </button>
 
             <button class="demo-btn" onclick="quickLogin('carlos.mendoza@empresa.com')">
-                <span>👔 <strong>Coordinador</strong> (Crea, consulta, asigna & atiende de su área)</span>
+                <span style="display:flex; align-items:center; gap:0.45rem;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><polyline points="17 11 19 13 23 9"/></svg>
+                    <strong>Coordinador</strong> (Crea, consulta, asigna & atiende de su área)
+                </span>
                 <small style="color:#2563EB; font-weight:600;">Entrar &rarr;</small>
             </button>
 
             <button class="demo-btn" onclick="quickLogin('juan.perez@empresa.com')">
-                <span>🛠️ <strong>Colaborador</strong> (Crea, consulta & atiende asignados y de su área)</span>
+                <span style="display:flex; align-items:center; gap:0.45rem;">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                    <strong>Colaborador</strong> (Crea, consulta & atiende asignados y de su área)
+                </span>
                 <small style="color:#2563EB; font-weight:600;">Entrar &rarr;</small>
             </button>
         </div>
@@ -141,10 +164,10 @@ if (isset($_SESSION['user'])) {
             executeLogin(email, password);
         });
 
-        function quickLogin(email) {
+        function quickLogin(email, password = 'password123') {
             document.getElementById('email').value = email;
-            document.getElementById('password').value = 'password123';
-            executeLogin(email, 'password123');
+            document.getElementById('password').value = password;
+            executeLogin(email, password);
         }
 
         async function executeLogin(email, password) {

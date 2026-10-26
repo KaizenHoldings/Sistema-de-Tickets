@@ -67,8 +67,14 @@ CREATE TABLE kanban_status (
 -- 5. TABLA DE TICKETS CON ADJUNTOS / CAPTURAS
 CREATE TABLE tickets (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    code VARCHAR(20) NOT NULL UNIQUE,
-    title VARCHAR(200) NOT NULL,
+    sharepoint_id INT NULL UNIQUE,
+    code VARCHAR(50) NOT NULL UNIQUE,
+    title VARCHAR(255) NOT NULL,
+    company_name VARCHAR(150) NULL,
+    area_code VARCHAR(20) NULL,
+    responsable VARCHAR(100) NULL,
+    observations TEXT NULL,
+    sp_status VARCHAR(50) NULL,
     description TEXT NOT NULL,
     priority ENUM('low', 'medium', 'high', 'urgent') NOT NULL DEFAULT 'medium',
     status_id INT NOT NULL DEFAULT 1,
@@ -121,3 +127,18 @@ CREATE TABLE ticket_comments (
     FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 9. ENCUESTAS DE SATISFACCIÓN (CSAT)
+CREATE TABLE ticket_satisfaction_surveys (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ticket_id INT NOT NULL,
+    user_id INT NOT NULL,
+    rating INT NOT NULL,
+    feedback TEXT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_survey_ticket (ticket_id),
+    INDEX idx_survey_user (user_id),
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+

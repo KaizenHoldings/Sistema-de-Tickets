@@ -116,9 +116,6 @@ class KanbanController {
     public function updateTicketStatus(int $ticketId, int $newStatusId, array $currentUser, string $comment = '', bool $isInternal = false): array {
         try {
             $comment = trim($comment);
-            if (empty($comment)) {
-                return ['success' => false, 'message' => 'Es obligatorio ingresar un comentario o nota interna explicando el cambio de estado.'];
-            }
 
             $stmtTicket = $this->db->prepare("SELECT id, code, area_id, status_id, assigned_agent_id, requester_id FROM tickets WHERE id = :id");
             $stmtTicket->execute([':id' => $ticketId]);
@@ -166,24 +163,30 @@ class KanbanController {
                 ':ticket_id' => $ticketId
             ]);
 
-            // Registrar comentario explicativo en el historial
-            $prefix = $isInternal ? "🔒 [CAMBIO A {$status['name']}]: " : "📢 [CAMBIO A {$status['name']}]: ";
-            $stmtComment = $this->db->prepare("
-                INSERT INTO ticket_comments (ticket_id, user_id, comment, is_internal)
-                VALUES (:ticket_id, :user_id, :comment, :is_internal)
-            ");
-            $stmtComment->execute([
-                ':ticket_id' => $ticketId,
-                ':user_id' => $userId,
-                ':comment' => $prefix . htmlspecialchars($comment, ENT_QUOTES, 'UTF-8'),
-                ':is_internal' => $isInternal ? 1 : 0
-            ]);
+            // Registrar comentario explicativo en el historial solo si se ingresó uno
+            if (!empty($comment)) {
+                $prefix = $isInternal ? "[Nota Interna - Cambio a {$status['name']}]: " : "[Cambio a {$status['name']}]: ";
+                $stmtComment = $this->db->prepare("
+                    INSERT INTO ticket_comments (ticket_id, user_id, comment, is_internal)
+                    VALUES (:ticket_id, :user_id, :comment, :is_internal)
+                ");
+                $stmtComment->execute([
+                    ':ticket_id' => $ticketId,
+                    ':user_id' => $userId,
+                    ':comment' => $prefix . htmlspecialchars($comment, ENT_QUOTES, 'UTF-8'),
+                    ':is_internal' => $isInternal ? 1 : 0
+                ]);
+            }
 
             $this->db->commit();
 
+            $message = !empty($comment)
+                ? "Ticket {$ticket['code']} actualizado a '{$status['name']}' con nota registrada."
+                : "Ticket {$ticket['code']} actualizado a '{$status['name']}'.";
+
             return [
                 'success' => true,
-                'message' => "Ticket {$ticket['code']} actualizado a '{$status['name']}' con nota registrada.",
+                'message' => $message,
                 'data' => [
                     'ticket_id' => $ticketId,
                     'status_id' => $newStatusId,

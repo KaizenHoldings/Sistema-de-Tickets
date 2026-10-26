@@ -22,13 +22,18 @@ const CSAT_LABELS = {
     5: 'Muy Satisfecho'
 };
 
-const CSAT_EMOJIS = {
-    1: '😢',
-    2: '🙁',
-    3: '😐',
-    4: '😊',
-    5: '🤩'
-};
+function getCsatStarRatingHtml(rating, max = 5) {
+    let html = '<span style="display:inline-flex; align-items:center; gap:2px;">';
+    for (let i = 1; i <= max; i++) {
+        if (i <= rating) {
+            html += '<svg width="15" height="15" viewBox="0 0 24 24" fill="#F59E0B" stroke="#D97706" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+        } else {
+            html += '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+        }
+    }
+    html += '</span>';
+    return html;
+}
 
 document.addEventListener('DOMContentLoaded', () => {
     initNavigationTabs();
@@ -41,6 +46,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initCsatFormSubmit();
     initNotifications();
     initGlobalSearch();
+    initTicketRowClickSelection();
 });
 
 function getCsrfToken() {
@@ -49,27 +55,32 @@ function getCsrfToken() {
 
 function initNavigationTabs() {
     const tabs = document.querySelectorAll('.nav-tab');
-    const contents = document.querySelectorAll('.tab-content');
 
     tabs.forEach(tab => {
-        tab.addEventListener('click', () => {
+        tab.addEventListener('click', (e) => {
+            const targetId = tab.dataset.target;
+            if (typeof switchNavTab === 'function') {
+                switchNavTab(targetId);
+                return;
+            }
+
+            const contents = document.querySelectorAll('.tab-content');
             tabs.forEach(t => t.classList.remove('active'));
             contents.forEach(c => c.classList.remove('active'));
 
             tab.classList.add('active');
-            const targetId = tab.dataset.target;
             const targetContent = document.getElementById(targetId);
             if (targetContent) targetContent.classList.add('active');
 
             if (targetId === 'tickets-tab') {
                 const heading = document.getElementById('tickets-view-heading');
                 if (heading) heading.textContent = 'Todos los tickets';
-                document.querySelectorAll('#all-tickets-tbody tr.ticket-row').forEach(r => r.style.display = '');
-                const emptyRow = document.getElementById('all-tickets-empty-search');
-                if (emptyRow) emptyRow.style.display = 'none';
+                if (typeof applyAllFilters === 'function') {
+                    applyAllFilters(true);
+                }
             }
 
-            if (targetId === 'inbox-tab') {
+            if (targetId === 'inbox-tab' && typeof loadUnassignedTickets === 'function') {
                 loadUnassignedTickets();
             }
         });
@@ -129,37 +140,64 @@ function initKanbanDragAndDrop() {
             const codeEl = draggedCard.querySelector('.ticket-code, .fd-ticket-code, .ticket-id');
             const ticketCode = codeEl ? codeEl.textContent.trim() : `Ticket #${ticketId}`;
 
-            // Solicitar obligatoriamente nota o comentario para aplicar la transición
-            requestStatusChange({
-                ticketId: ticketId,
-                newStatusId: newStatusId,
-                oldStatusId: oldStatusId,
-                ticketCode: ticketCode,
-                draggedCard: draggedCard,
-                originColumn: currentColumn,
-                targetColumn: column,
-                source: 'kanban'
+            // Al arrastrar en Kanban, abrir el modal de ticket con el nuevo estado seleccionado para guardar con SharePoint
+            openTicketModal(ticketId).then(() => {
+                syncModalStatusFromId(newStatusId);
+                showToast(`Estado ajustado a '${STATUS_ID_TO_SP[newStatusId] || 'nuevo estado'}'. Presione 'Guardar en SharePoint' para aplicar.`, 'info');
             });
         });
     });
 }
 
-// Interceptar cambio de estado desde el dropdown de propiedades en el modal de detalle
+const STATUS_ID_TO_SP = {
+    1: 'Pendiente',
+    2: 'En proceso',
+    3: 'Stand By',
+    4: 'Procesado'
+};
+
+const SP_TO_STATUS_ID = {
+    'pendiente': 1,
+    'en proceso': 2,
+    'en_proceso': 2,
+    'stand by': 3,
+    'stand_by': 3,
+    'procesado': 4
+};
+
+function updateModalStatusPill(spStatus) {
+    const statusPill = document.getElementById('modal-ticket-status-pill');
+    if (!statusPill) return;
+    statusPill.textContent = spStatus;
+    let statusClass = 'fd-status-pendiente';
+    const lower = (spStatus || '').toLowerCase();
+    if (lower.includes('procesado')) statusClass = 'fd-status-procesado';
+    else if (lower.includes('en proceso') || lower.includes('en_proceso')) statusClass = 'fd-status-en-proceso';
+    else if (lower.includes('stand by') || lower.includes('stand_by')) statusClass = 'fd-status-stand-by';
+    statusPill.className = `fd-status-badge ${statusClass}`;
+}
+
+function syncModalStatusFromId(statusId) {
+    const id = parseInt(statusId);
+    const spStatus = STATUS_ID_TO_SP[id] || 'Pendiente';
+    const spSelect = document.getElementById('modal-sp-status-select');
+    if (spSelect) spSelect.value = spStatus;
+    updateModalStatusPill(spStatus);
+}
+
+function syncModalStatusFromName(spStatus) {
+    const lower = (spStatus || '').toLowerCase().trim();
+    const statusId = SP_TO_STATUS_ID[lower] || 1;
+    const propSelect = document.getElementById('modal-prop-status-select');
+    if (propSelect) propSelect.value = statusId;
+    updateModalStatusPill(spStatus);
+}
+
+// Sincronizar cambio de estado desde el dropdown de propiedades en el modal sin abrir modal emergente
 function handleDetailStatusChange(selectEl) {
     if (!currentTicketData) return;
     const newStatusId = parseInt(selectEl.value);
-    const oldStatusId = parseInt(currentTicketData.status_id);
-
-    if (newStatusId === oldStatusId) return;
-
-    requestStatusChange({
-        ticketId: currentTicketData.id,
-        newStatusId: newStatusId,
-        oldStatusId: oldStatusId,
-        ticketCode: currentTicketData.code,
-        selectEl: selectEl,
-        source: 'modal'
-    });
+    syncModalStatusFromId(newStatusId);
 }
 
 // Abrir el modal de cambio de estado solicitando nota/comentario obligatorio
@@ -225,10 +263,6 @@ function initStatusChangeForm() {
         if (!pendingStatusChange) return;
 
         const commentText = document.getElementById('status-change-comment').value.trim();
-        if (!commentText) {
-            showToast('Debe ingresar un comentario o nota interna explicando el cambio de estado.', 'error');
-            return;
-        }
 
         const ticketId = pendingStatusChange.ticketId;
         const newStatusId = pendingStatusChange.newStatusId;
@@ -403,7 +437,7 @@ function initCsatFormSubmit() {
                     banner.innerHTML = `
                         <div style="background:#F0FDF4; border:1px solid #BBF7D0; border-radius:8px; padding:0.85rem 1rem; display:flex; align-items:center; justify-content:space-between;">
                             <div style="display:flex; align-items:center; gap:0.75rem;">
-                                <span style="font-size:26px;">${CSAT_EMOJIS[rating] || '⭐'}</span>
+                                ${getCsatStarRatingHtml(rating)}
                                 <div>
                                     <div style="font-size:13px; font-weight:700; color:#166534;">Encuesta de Satisfacción (CSAT): ${CSAT_LABELS[rating]} (${rating}/5)</div>
                                     <div style="font-size:12px; color:#15803D; margin-top:2px;">"${escapeHtml(feedback || 'Sin comentarios adicionales')}"</div>
@@ -448,7 +482,11 @@ function initNewTicketForm() {
             if (result.success) {
                 showToast(result.message, 'success');
                 form.reset();
-                setTimeout(() => location.reload(), 1500);
+                setTimeout(() => {
+                    const activeContent = document.querySelector('.tab-content.active');
+                    const tab = activeContent ? activeContent.id : 'tickets-tab';
+                    window.location.href = `index.php?tab=${encodeURIComponent(tab)}&page=1`;
+                }, 1500);
             } else {
                 showToast(result.message, 'error');
             }
@@ -479,7 +517,9 @@ function initSuperAdminForms() {
                 if (result.success) {
                     showToast(result.message, 'success');
                     areaForm.reset();
-                    setTimeout(() => location.reload(), 1200);
+                    setTimeout(() => {
+                        window.location.href = 'index.php?tab=admin-tab';
+                    }, 1000);
                 } else {
                     showToast(result.message, 'error');
                 }
@@ -489,11 +529,12 @@ function initSuperAdminForms() {
         });
     }
 
-    const userForm = document.getElementById('create-user-form');
-    if (userForm) {
-        userForm.addEventListener('submit', async (e) => {
+    // Formulario Modal Crear Usuario
+    const modalCreateUserForm = document.getElementById('modal-create-user-form');
+    if (modalCreateUserForm) {
+        modalCreateUserForm.addEventListener('submit', async (e) => {
             e.preventDefault();
-            const data = Object.fromEntries(new FormData(userForm).entries());
+            const data = Object.fromEntries(new FormData(modalCreateUserForm).entries());
             data.csrf_token = getCsrfToken();
 
             try {
@@ -508,8 +549,10 @@ function initSuperAdminForms() {
                 const result = await response.json();
                 if (result.success) {
                     showToast(result.message, 'success');
-                    userForm.reset();
-                    setTimeout(() => location.reload(), 1200);
+                    closeCreateUserModal();
+                    setTimeout(() => {
+                        window.location.href = 'index.php?tab=admin-tab';
+                    }, 900);
                 } else {
                     showToast(result.message, 'error');
                 }
@@ -517,6 +560,273 @@ function initSuperAdminForms() {
                 showToast('Error al registrar colaborador.', 'error');
             }
         });
+    }
+
+    // Formulario Modal Editar Usuario
+    const modalEditUserForm = document.getElementById('modal-edit-user-form');
+    if (modalEditUserForm) {
+        modalEditUserForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const data = Object.fromEntries(new FormData(modalEditUserForm).entries());
+            data.csrf_token = getCsrfToken();
+
+            try {
+                const response = await fetch('api.php?action=update_user', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCsrfToken()
+                    },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showToast(result.message, 'success');
+                    closeEditUserModal();
+                    setTimeout(() => {
+                        window.location.href = 'index.php?tab=admin-tab';
+                    }, 900);
+                } else {
+                    showToast(result.message, 'error');
+                }
+            } catch (err) {
+                showToast('Error al actualizar datos del usuario.', 'error');
+            }
+        });
+    }
+
+    // Formulario Modal Restablecer Contraseña
+    const modalResetPwdForm = document.getElementById('modal-reset-password-form');
+    if (modalResetPwdForm) {
+        modalResetPwdForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const pwd = document.getElementById('reset-new-password')?.value || '';
+            const confirmPwd = document.getElementById('reset-confirm-password')?.value || '';
+
+            if (pwd !== confirmPwd) {
+                showToast('Las contraseñas no coinciden.', 'error');
+                return;
+            }
+
+            if (pwd.length < 6) {
+                showToast('La contraseña debe tener al menos 6 caracteres.', 'error');
+                return;
+            }
+
+            const data = Object.fromEntries(new FormData(modalResetPwdForm).entries());
+            data.csrf_token = getCsrfToken();
+
+            try {
+                const response = await fetch('api.php?action=reset_user_password', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'X-CSRF-Token': getCsrfToken()
+                    },
+                    body: JSON.stringify(data)
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showToast(result.message, 'success');
+                    closeResetPasswordModal();
+                } else {
+                    showToast(result.message, 'error');
+                }
+            } catch (err) {
+                showToast('Error al restablecer la contraseña.', 'error');
+            }
+        });
+    }
+}
+
+function switchAdminSection(section) {
+    const usersView = document.getElementById('admin-users-view');
+    const areasView = document.getElementById('admin-areas-view');
+    const btnUsers = document.getElementById('tab-btn-users');
+    const btnAreas = document.getElementById('tab-btn-areas');
+
+    if (section === 'areas') {
+        if (usersView) usersView.style.display = 'none';
+        if (areasView) areasView.style.display = 'block';
+        if (btnUsers) btnUsers.classList.remove('active');
+        if (btnAreas) btnAreas.classList.add('active');
+    } else {
+        if (usersView) usersView.style.display = 'block';
+        if (areasView) areasView.style.display = 'none';
+        if (btnUsers) btnUsers.classList.add('active');
+        if (btnAreas) btnAreas.classList.remove('active');
+    }
+}
+
+function filterUsersTable() {
+    const searchInput = document.getElementById('user-search-input');
+    const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+
+    const areaSelect = document.getElementById('user-filter-area');
+    const selectedArea = areaSelect ? areaSelect.value.toLowerCase().trim() : '';
+
+    const roleSelect = document.getElementById('user-filter-role');
+    const selectedRole = roleSelect ? roleSelect.value.trim() : '';
+
+    const statusSelect = document.getElementById('user-filter-status');
+    const selectedStatus = statusSelect ? statusSelect.value.trim() : '';
+
+    const rows = document.querySelectorAll('#users-management-table tbody tr.user-row');
+
+    rows.forEach(row => {
+        const name = row.dataset.name || '';
+        const email = row.dataset.email || '';
+        const area = (row.dataset.area || '').toLowerCase();
+        const role = row.dataset.role || '';
+        const active = row.dataset.active || '';
+
+        const matchQuery = !query || name.includes(query) || email.includes(query);
+        const matchArea = !selectedArea || area.includes(selectedArea);
+        const matchRole = !selectedRole || role === selectedRole;
+        const matchStatus = !selectedStatus || active === selectedStatus;
+
+        if (matchQuery && matchArea && matchRole && matchStatus) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    });
+}
+
+function openCreateUserModal() {
+    const modal = document.getElementById('create-user-modal');
+    if (modal) {
+        modal.style.display = 'flex';
+        modal.classList.add('active');
+        const form = document.getElementById('modal-create-user-form');
+        if (form) form.reset();
+    }
+}
+
+function closeCreateUserModal() {
+    const modal = document.getElementById('create-user-modal');
+    if (modal) {
+        modal.style.display = 'none';
+        modal.classList.remove('active');
+    }
+}
+
+function openEditUserModal(user) {
+    const modal = document.getElementById('edit-user-modal');
+    if (!modal) return;
+
+    const idInput = document.getElementById('edit-user-id');
+    const nameInput = document.getElementById('edit-user-name');
+    const emailInput = document.getElementById('edit-user-email');
+    const areaInput = document.getElementById('edit-user-area-id');
+    const roleInput = document.getElementById('edit-user-role-id');
+    const pwdInput = document.getElementById('edit-user-password');
+
+    if (idInput) idInput.value = user.id;
+    if (nameInput) nameInput.value = user.name || '';
+    if (emailInput) emailInput.value = user.email || '';
+    if (areaInput) areaInput.value = user.area_id || '';
+    if (roleInput) roleInput.value = user.role_id || '3';
+    if (pwdInput) pwdInput.value = '';
+
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+}
+
+function closeEditUserModal() {
+    const modal = document.getElementById('edit-user-modal');
+    if (modal) {
+        modal.style.display = 'none';
+        modal.classList.remove('active');
+    }
+}
+
+function openResetPasswordModal(userId, userName) {
+    const modal = document.getElementById('reset-password-modal');
+    if (!modal) return;
+
+    const idInput = document.getElementById('reset-pwd-user-id');
+    const nameLabel = document.getElementById('reset-pwd-user-name');
+    const pwdInput = document.getElementById('reset-new-password');
+    const confirmInput = document.getElementById('reset-confirm-password');
+
+    if (idInput) idInput.value = userId;
+    if (nameLabel) nameLabel.textContent = userName || ('Usuario #' + userId);
+    if (pwdInput) pwdInput.value = '';
+    if (confirmInput) confirmInput.value = '';
+
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+}
+
+function closeResetPasswordModal() {
+    const modal = document.getElementById('reset-password-modal');
+    if (modal) {
+        modal.style.display = 'none';
+        modal.classList.remove('active');
+    }
+}
+
+async function toggleUserStatus(userId, userName, currentStatus) {
+    const actionText = currentStatus === 1 ? 'desactivar' : 'activar';
+    if (!confirm(`¿Está seguro de que desea ${actionText} la cuenta de "${userName}"?`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch('api.php?action=toggle_user_status', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': getCsrfToken()
+            },
+            body: JSON.stringify({
+                user_id: parseInt(userId),
+                csrf_token: getCsrfToken()
+            })
+        });
+        const result = await response.json();
+        if (result.success) {
+            showToast(result.message, 'success');
+            setTimeout(() => {
+                window.location.href = 'index.php?tab=admin-tab';
+            }, 800);
+        } else {
+            showToast(result.message, 'error');
+        }
+    } catch (e) {
+        showToast('Error al cambiar el estado del usuario.', 'error');
+    }
+}
+
+async function deleteUser(userId, userName) {
+    if (!confirm(`¿Está seguro de que desea eliminar permanentemente al usuario "${userName}"?\n\nNota: Si el usuario tiene tickets o comentarios asociados, la eliminación será rechazada por integridad referencial.`)) {
+        return;
+    }
+
+    try {
+        const response = await fetch('api.php?action=delete_user', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': getCsrfToken()
+            },
+            body: JSON.stringify({
+                user_id: parseInt(userId),
+                csrf_token: getCsrfToken()
+            })
+        });
+        const result = await response.json();
+        if (result.success) {
+            showToast(result.message, 'success');
+            setTimeout(() => {
+                window.location.href = 'index.php?tab=admin-tab';
+            }, 900);
+        } else {
+            alert(result.message);
+        }
+    } catch (e) {
+        showToast('Error al procesar la eliminación del usuario.', 'error');
     }
 }
 
@@ -536,19 +846,24 @@ async function loadUnassignedTickets() {
             const isColaborador = (window.CURRENT_USER_ROLE === 'colaborador');
             result.data.forEach(t => {
                 const tr = document.createElement('tr');
+                tr.className = 'ticket-row';
+                tr.dataset.ticketId = t.id;
                 const actionButtons = isColaborador ? `
-                    <button class="btn-primary" style="padding:0.35rem 0.75rem; font-size:12px; background:#10B981;" onclick="pickupTicket(${t.id})">
-                        ⚡ Tomar Ticket
+                    <button class="btn-primary" style="padding:0.35rem 0.75rem; font-size:12px; background:#10B981; display:inline-flex; align-items:center; gap:0.3rem;" onclick="pickupTicket(${t.id})">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                        Tomar Ticket
                     </button>
                     <button class="btn-secondary" style="padding:0.35rem 0.75rem; font-size:12px; margin-left:0.35rem;" onclick="openTicketModal(${t.id})">
                         Ver Detalle
                     </button>
                 ` : `
-                    <button class="btn-primary" style="padding:0.35rem 0.75rem; font-size:12px; background:#10B981;" onclick="openAssignAgentDialog(${t.id}, ${t.area_id})">
-                        👤 Asignar Agente
+                    <button class="btn-primary" style="padding:0.35rem 0.75rem; font-size:12px; background:#10B981; display:inline-flex; align-items:center; gap:0.3rem;" onclick="openAssignAgentDialog(${t.id}, ${t.area_id})">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
+                        Asignar Agente
                     </button>
-                    <button class="btn-secondary" style="padding:0.35rem 0.75rem; font-size:12px; margin-left:0.35rem;" onclick="pickupTicket(${t.id})">
-                        ⚡ Tomar Ticket
+                    <button class="btn-secondary" style="padding:0.35rem 0.75rem; font-size:12px; margin-left:0.35rem; display:inline-flex; align-items:center; gap:0.3rem;" onclick="pickupTicket(${t.id})">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+                        Tomar Ticket
                     </button>
                 `;
 
@@ -560,8 +875,8 @@ async function loadUnassignedTickets() {
                         <a style="cursor:pointer; color:var(--fd-text); text-decoration:none; font-weight:500;" onclick="openTicketModal(${t.id})">
                             ${escapeHtml(t.title)}
                         </a>
-                        ${t.attachment_path ? '📎' : ''}
-                        <div style="font-size:11px; color:var(--fd-text-dim);">🏢 ${escapeHtml(t.area_name || 'General')}</div>
+                        ${t.attachment_path ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-left:4px;"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>' : ''}
+                        <div style="font-size:11px; color:var(--fd-text-dim);">${escapeHtml(t.area_name || 'General')}</div>
                     </td>
                     <td>${escapeHtml(t.requester_name)}</td>
                     <td><span class="fd-prio-badge fd-prio-${t.priority}">${t.priority}</span></td>
@@ -577,7 +892,7 @@ async function loadUnassignedTickets() {
                 badge.style.display = 'inline-block';
             }
         } else {
-            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:2rem; color:var(--fd-text-muted);">✨ No hay tickets pendientes por asignar en esta área actualmente.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:2rem; color:var(--fd-text-muted);">No hay tickets pendientes por asignar en esta área actualmente.</td></tr>';
             const badge = document.getElementById('inbox-badge-count');
             if (badge) {
                 badge.style.display = 'none';
@@ -607,7 +922,7 @@ async function pickupTicket(ticketId) {
                 row.dataset.agentId = window.CURRENT_USER_ID;
                 row.dataset.statusId = 2;
                 const agentDisplay = row.querySelector('.agent-name-display');
-                if (agentDisplay) agentDisplay.textContent = '👤 Mi Usuario';
+                if (agentDisplay) agentDisplay.textContent = 'Mi Usuario';
                 
                 const statusBadge = row.querySelector('.fd-status-badge');
                 if (statusBadge) {
@@ -665,7 +980,7 @@ async function openAssignAgentDialog(ticketId, targetAreaId = null) {
             dataAgents.data.forEach(a => {
                 const opt = document.createElement('option');
                 opt.value = a.id;
-                opt.textContent = `👤 ${a.name} (${a.email}) - ${a.role_description || a.role_name}`;
+                opt.textContent = `${a.name} (${a.email}) - ${a.role_description || a.role_name}`;
                 select.appendChild(opt);
             });
         } else {
@@ -685,7 +1000,7 @@ function initAssignFormSubmit() {
         const ticketId = document.getElementById('assign-ticket-id-input').value;
         const selectAgent = document.getElementById('assign-agent-select');
         const agentId = selectAgent.value;
-        const agentName = selectAgent.options[selectAgent.selectedIndex]?.text.split('-')[0].replace('👤', '').trim();
+        const agentName = selectAgent.options[selectAgent.selectedIndex]?.text.split('-')[0].trim();
 
         if (!agentId) {
             showToast('Por favor seleccione un colaborador de la lista.', 'error');
@@ -710,6 +1025,12 @@ function initAssignFormSubmit() {
             if (result.success) {
                 showToast(result.message, 'success');
                 document.getElementById('assign-modal').style.display = 'none';
+
+                // Actualizar campo unificado de responsable en el modal principal si está abierto
+                const spRespInput = document.getElementById('modal-sp-responsable-input');
+                if (spRespInput) spRespInput.value = agentName;
+                const agentSpan = document.getElementById('modal-ticket-agent');
+                if (agentSpan) agentSpan.textContent = agentName;
                 
                 // Actualizar botón a "Reasignar Agente" y estado en las tablas
                 document.querySelectorAll(`tr[data-ticket-id="${ticketId}"]`).forEach(row => {
@@ -719,7 +1040,7 @@ function initAssignFormSubmit() {
 
                     const assignBtn = row.querySelector('button[onclick*="openAssignAgentDialog"]');
                     if (assignBtn) {
-                        assignBtn.innerHTML = '🔄 Reasignar Agente';
+                        assignBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:4px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>Reasignar Agente';
                         assignBtn.className = 'btn-secondary';
                         assignBtn.style.background = '';
                     }
@@ -781,6 +1102,10 @@ async function openTicketModal(ticketId) {
     const modal = document.getElementById('ticket-modal');
     if (!modal) return;
 
+    // Resaltar visualmente la fila del ticket seleccionado en todas las tablas
+    document.querySelectorAll('tr.ticket-row-selected').forEach(r => r.classList.remove('ticket-row-selected'));
+    document.querySelectorAll(`tr[data-ticket-id="${ticketId}"]`).forEach(r => r.classList.add('ticket-row-selected'));
+
     try {
         const response = await fetch(`api.php?action=get_ticket_detail&ticket_id=${ticketId}`);
         const result = await response.json();
@@ -796,10 +1121,61 @@ async function openTicketModal(ticketId) {
             document.getElementById('modal-ticket-area').textContent = ticket.area_name;
             document.getElementById('modal-ticket-id-input').value = ticket.id;
 
+            // Campos de Edición SharePoint
+            const spIdTag = document.getElementById('modal-sp-id-tag');
+            if (spIdTag) {
+                if (ticket.sharepoint_id && parseInt(ticket.sharepoint_id) > 0) {
+                    spIdTag.textContent = `ID SharePoint: #${ticket.sharepoint_id}`;
+                    spIdTag.style.background = '#E0F2FE';
+                    spIdTag.style.color = '#0369A1';
+                } else {
+                    spIdTag.textContent = `Local (Sin SharePoint)`;
+                    spIdTag.style.background = '#F1F5F9';
+                    spIdTag.style.color = '#64748B';
+                }
+            }
+
+            const exportBtn = document.getElementById('btn-export-to-sharepoint');
+            if (exportBtn) {
+                if (!ticket.sharepoint_id || parseInt(ticket.sharepoint_id) <= 0) {
+                    exportBtn.style.display = 'inline-flex';
+                    exportBtn.onclick = () => exportCurrentTicketToSharePoint(ticket.id);
+                } else {
+                    exportBtn.style.display = 'none';
+                }
+            }
+
+            const spStatus = ticket.sp_status || ticket.status_name || 'Pendiente';
+            const spStatusSelect = document.getElementById('modal-sp-status-select');
+            if (spStatusSelect) spStatusSelect.value = spStatus;
+
+            const spCompanyInput = document.getElementById('modal-sp-company-input');
+            if (spCompanyInput) spCompanyInput.value = ticket.company_name || ticket.requester_name || '';
+
+            const spAreaSelect = document.getElementById('modal-sp-area-select');
+            if (spAreaSelect) spAreaSelect.value = ticket.area_code || ((parseInt(ticket.area_id) === 3) ? 'SSGG' : 'IT');
+
+            const spRespInput = document.getElementById('modal-sp-responsable-input');
+            if (spRespInput) spRespInput.value = ticket.responsable || ticket.agent_name || '';
+
+            const spTitleInput = document.getElementById('modal-sp-title-input');
+            if (spTitleInput) spTitleInput.value = ticket.title || '';
+
+            const spObsInput = document.getElementById('modal-sp-observations-input');
+            if (spObsInput) spObsInput.value = ticket.observations || '';
+
+            const spFeedback = document.getElementById('modal-sp-save-feedback');
+            if (spFeedback) spFeedback.style.display = 'none';
+
             const statusPill = document.getElementById('modal-ticket-status-pill');
             if (statusPill) {
-                statusPill.textContent = ticket.status_name || 'Por Asignar';
-                statusPill.className = `fd-status-badge fd-status-${ticket.status_slug || 'unassigned'}`;
+                statusPill.textContent = spStatus;
+                let statusClass = 'fd-status-pendiente';
+                const lowerStatus = spStatus.toLowerCase();
+                if (lowerStatus.includes('procesado')) statusClass = 'fd-status-procesado';
+                else if (lowerStatus.includes('en proceso') || lowerStatus.includes('en_proceso')) statusClass = 'fd-status-en-proceso';
+                else if (lowerStatus.includes('stand by') || lowerStatus.includes('stand_by')) statusClass = 'fd-status-stand-by';
+                statusPill.className = `fd-status-badge ${statusClass}`;
             }
 
             const prioPill = document.getElementById('modal-ticket-prio-pill');
@@ -818,6 +1194,20 @@ async function openTicketModal(ticketId) {
                 dateEl.textContent = ticket.created_at ? `Creado el ${ticket.created_at.substring(0, 16)}` : '';
             }
 
+            const dueDateEl = document.getElementById('modal-ticket-due-date');
+            if (dueDateEl) {
+                dueDateEl.textContent = ticket.due_date ? ticket.due_date.substring(0, 16) : '—';
+            }
+
+            const resolvedDateEl = document.getElementById('modal-ticket-resolved-date');
+            const resolvedPill = document.getElementById('modal-resolved-date-pill');
+            if (resolvedDateEl) {
+                resolvedDateEl.textContent = ticket.resolved_at ? ticket.resolved_at.substring(0, 16) : '—';
+                if (resolvedPill) {
+                    resolvedPill.style.display = ticket.resolved_at ? 'inline-block' : 'none';
+                }
+            }
+
             // Permisos para editar propiedades (Admin, Manager de esa área o Agente asignado)
             const canEditProps = (window.CURRENT_USER_ROLE === 'admin' || (window.CURRENT_USER_ROLE === 'manager' && parseInt(ticket.area_id) === parseInt(window.CURRENT_USER_AREA_ID)) || (ticket.assigned_agent_id && parseInt(ticket.assigned_agent_id) === parseInt(window.CURRENT_USER_ID)));
 
@@ -826,7 +1216,7 @@ async function openTicketModal(ticketId) {
                 statusSelect.value = ticket.status_id;
                 statusSelect.disabled = !canEditProps;
                 statusSelect.style.cursor = canEditProps ? 'pointer' : 'not-allowed';
-                statusSelect.title = canEditProps ? 'Modificar estado (requiere comentario obligatorio)' : 'Solo agentes asignados o coordinadores pueden modificar el estado';
+                statusSelect.title = canEditProps ? 'Modificar estado' : 'Solo agentes asignados o coordinadores pueden modificar el estado';
             }
 
             const prioSelect = document.getElementById('modal-prop-priority-select');
@@ -847,11 +1237,11 @@ async function openTicketModal(ticketId) {
                 if (canAssign) {
                     assignContainer.style.display = 'inline-block';
                     if (!ticket.assigned_agent_id) {
-                        assignBtn.innerHTML = '👤 Asignar Agente';
+                        assignBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:4px;"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>Asignar Agente';
                         assignBtn.className = 'btn-primary';
                         assignBtn.style.backgroundColor = '#10B981';
                     } else {
-                        assignBtn.innerHTML = '🔄 Reasignar Agente';
+                        assignBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:4px;"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>Reasignar Agente';
                         assignBtn.className = 'btn-secondary';
                         assignBtn.style.backgroundColor = '';
                     }
@@ -864,7 +1254,7 @@ async function openTicketModal(ticketId) {
                     };
                 } else if (canPickup) {
                     assignContainer.style.display = 'inline-block';
-                    assignBtn.innerHTML = '⚡ Tomar Ticket';
+                    assignBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:4px;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>Tomar Ticket';
                     assignBtn.className = 'btn-primary';
                     assignBtn.style.backgroundColor = '#10B981';
                     assignBtn.onclick = async (e) => {
@@ -889,7 +1279,7 @@ async function openTicketModal(ticketId) {
                     csatBanner.innerHTML = `
                         <div style="background:#F0FDF4; border:1px solid #BBF7D0; border-radius:8px; padding:0.85rem 1rem; display:flex; align-items:center; justify-content:space-between;">
                             <div style="display:flex; align-items:center; gap:0.75rem;">
-                                <span style="font-size:26px;">${CSAT_EMOJIS[rating] || '⭐'}</span>
+                                ${getCsatStarRatingHtml(rating)}
                                 <div>
                                     <div style="font-size:13px; font-weight:700; color:#166534;">Encuesta de Satisfacción (CSAT): ${CSAT_LABELS[rating] || ''} (${rating}/5)</div>
                                     <div style="font-size:12px; color:#15803D; margin-top:2px;">"${escapeHtml(ticket.survey.feedback || 'Sin comentarios adicionales')}"</div>
@@ -905,14 +1295,15 @@ async function openTicketModal(ticketId) {
                         csatBanner.innerHTML = `
                             <div style="background:#FEF3C7; border:1px solid #FDE68A; border-radius:8px; padding:0.85rem 1rem; display:flex; align-items:center; justify-content:space-between;">
                                 <div style="display:flex; align-items:center; gap:0.75rem;">
-                                    <span style="font-size:24px;">⭐</span>
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="#F59E0B" stroke="#D97706" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
                                     <div>
                                         <div style="font-size:13px; font-weight:700; color:#92400E;">Ticket Resuelto - Encuesta de Satisfacción Pendiente</div>
                                         <div style="font-size:12px; color:#B45309;">Ayúdanos a mejorar calificando tu experiencia con el soporte recibido.</div>
                                     </div>
                                 </div>
-                                <button type="button" class="btn-primary" style="background:#D97706; font-size:12px; padding:0.4rem 0.8rem;" onclick="openCsatModal(${ticket.id})">
-                                    ⭐ Calificar Servicio
+                                <button type="button" class="btn-primary" style="background:#D97706; font-size:12px; padding:0.4rem 0.8rem; display:inline-flex; align-items:center; gap:0.35rem;" onclick="openCsatModal(${ticket.id})">
+                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="#FFFFFF" stroke="#FFFFFF" stroke-width="1"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+                                    Calificar Servicio
                                 </button>
                             </div>
                         `;
@@ -920,7 +1311,7 @@ async function openTicketModal(ticketId) {
                         csatBanner.innerHTML = `
                             <div style="background:#F1F5F9; border:1px solid #E2E8F0; border-radius:8px; padding:0.85rem 1rem; display:flex; align-items:center; justify-content:space-between;">
                                 <div style="display:flex; align-items:center; gap:0.75rem;">
-                                    <span style="font-size:24px;">ℹ️</span>
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
                                     <div>
                                         <div style="font-size:13px; font-weight:700; color:#334155;">Ticket Resuelto</div>
                                         <div style="font-size:12px; color:#64748b;">Pendiente de calificación por parte del solicitante (${escapeHtml(ticket.requester_name)}).</div>
@@ -949,12 +1340,13 @@ async function openTicketModal(ticketId) {
                         <a href="${ticket.attachment_path}" target="_blank">
                             <img src="${ticket.attachment_path}" alt="Captura de pantalla" style="max-width:100%; max-height:280px; border-radius:8px; border:1px solid var(--border-subtle); margin-top:0.4rem;">
                         </a>
-                        <div style="margin-top:0.3rem;"><a href="${ticket.attachment_path}" target="_blank" style="color:#0284c7; font-size:12px;">🔎 Ver captura en tamaño completo</a></div>
+                        <div style="margin-top:0.3rem;"><a href="${ticket.attachment_path}" target="_blank" style="color:#0284c7; font-size:12px; display:inline-flex; align-items:center; gap:0.25rem;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>Ver captura en tamaño completo</a></div>
                     `;
                 } else {
                     attachmentContent.innerHTML = `
-                        <a href="${ticket.attachment_path}" target="_blank" class="btn-secondary" style="font-size:12px; padding:0.4rem 0.8rem;">
-                            📄 Descargar Documento Adjunto (${fileExt.toUpperCase()})
+                        <a href="${ticket.attachment_path}" target="_blank" class="btn-secondary" style="font-size:12px; padding:0.4rem 0.8rem; display:inline-flex; align-items:center; gap:0.35rem;">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+                            Descargar Documento Adjunto (${fileExt.toUpperCase()})
                         </a>
                     `;
                 }
@@ -963,11 +1355,21 @@ async function openTicketModal(ticketId) {
                 attachmentContent.innerHTML = '';
             }
 
+            // Control de Visibilidad del Botón "Eliminar Ticket" en el Modal
+            const deleteBtn = document.getElementById('btn-delete-ticket-modal');
+            if (deleteBtn) {
+                const canDelete = (window.CURRENT_USER_ROLE === 'admin' 
+                    || (window.CURRENT_USER_ROLE === 'manager' && parseInt(ticket.area_id) === parseInt(window.CURRENT_USER_AREA_ID))
+                    || (parseInt(ticket.requester_id) === parseInt(window.CURRENT_USER_ID) && parseInt(ticket.status_id) === 1));
+                deleteBtn.style.display = canDelete ? 'inline-flex' : 'none';
+            }
+
             loadTicketComments(ticket.id);
             modal.style.display = 'flex';
         } else {
             showToast(result.message, 'error');
         }
+
     } catch (err) {
         showToast('No se pudo cargar la información del ticket.', 'error');
     }
@@ -989,7 +1391,7 @@ async function loadTicketComments(ticketId) {
                 div.className = `comment-bubble ${isInternal ? 'internal-note' : ''}`;
                 div.innerHTML = `
                     <div class="comment-meta">
-                        <span><strong>${escapeHtml(c.user_name)}</strong> (${c.role_name}) ${isInternal ? '<em style="color:#f59e0b">🔒 Nota Privada Interna</em>' : ''}</span>
+                        <span><strong>${escapeHtml(c.user_name)}</strong> (${c.role_name}) ${isInternal ? '<em style="color:#D97706; display:inline-flex; align-items:center; gap:3px;"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>Nota Privada Interna</em>' : ''}</span>
                         <span>${c.created_at}</span>
                     </div>
                     <div>${escapeHtml(c.comment)}</div>
@@ -1098,22 +1500,22 @@ function showToast(message, type = 'success') {
     }
 
     const icons = {
-        success: '✅',
-        error: '❌',
-        warning: '⚠️',
-        info: 'ℹ️'
+        success: `<div class="toast-icon-wrapper toast-icon-success"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></div>`,
+        error: `<div class="toast-icon-wrapper toast-icon-error"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg></div>`,
+        warning: `<div class="toast-icon-wrapper toast-icon-warning"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>`,
+        info: `<div class="toast-icon-wrapper toast-icon-info"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg></div>`
     };
 
+    toast.className = `toast-${type}`;
     toast.innerHTML = `
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:0.5rem;">
-            <div style="display:flex; align-items:center; gap:0.6rem;">
-                <span style="font-size:16px;">${icons[type] || 'ℹ️'}</span>
-                <span>${escapeHtml(message)}</span>
+        <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:0.75rem;">
+            <div style="display:flex; align-items:center; gap:0.75rem;">
+                ${icons[type] || icons.info}
+                <span style="font-size:13px; font-weight:500; color:#1E293B; line-height:1.4;">${escapeHtml(message)}</span>
             </div>
-            <button onclick="this.parentElement.parentElement.style.display='none'" style="background:none; border:none; color:inherit; font-size:16px; cursor:pointer; padding:0 4px; opacity:0.7;">&times;</button>
+            <button type="button" onclick="this.closest('#toast-notification').style.display='none'" style="background:none; border:none; color:#94A3B8; font-size:16px; cursor:pointer; padding:0 2px; line-height:1; display:flex; align-items:center; justify-content:center; transition:color 0.15s ease;" onmouseover="this.style.color='#475569'" onmouseout="this.style.color='#94A3B8'" aria-label="Cerrar">&times;</button>
         </div>
     `;
-    toast.className = `toast-${type}`;
     toast.style.display = 'block';
 
     if (window._toastTimeout) clearTimeout(window._toastTimeout);
@@ -1142,8 +1544,38 @@ function initGlobalSearch() {
     }
 }
 
+// ==========================================================================
+// SELECCIÓN Y APERTURA DE TICKET AL HACER CLIC EN LA FILA
+// ==========================================================================
+function initTicketRowClickSelection() {
+    document.addEventListener('click', (e) => {
+        // Ignorar si el clic fue en un elemento de acción directo (botones, enlaces, inputs, etc.)
+        if (e.target.closest('button, a, input, select, textarea, label, .btn-primary, .btn-secondary, .fd-ticket-link')) {
+            return;
+        }
+
+        // Buscar si el clic proviene de una fila de ticket
+        const row = e.target.closest('tr.ticket-row, tr[data-ticket-id]');
+        if (!row) return;
+
+        const ticketId = row.dataset.ticketId;
+        if (ticketId && typeof openTicketModal === 'function') {
+            openTicketModal(parseInt(ticketId, 10));
+        }
+    });
+}
+
 function filterTicketsGlobal(query) {
     query = (query || '').toLowerCase().trim();
+
+    if (typeof applyAllFilters === 'function') {
+        const globalSearch = document.getElementById('filter-global-search');
+        if (globalSearch && globalSearch.value !== query) {
+            globalSearch.value = query;
+        }
+        applyAllFilters();
+        return;
+    }
 
     // 1. Filtrar tabla de Todos los Tickets
     const tableRows = document.querySelectorAll('#all-tickets-tbody tr.ticket-row');
@@ -1160,7 +1592,7 @@ function filterTicketsGlobal(query) {
         if (!emptyRow) {
             emptyRow = document.createElement('tr');
             emptyRow.id = 'all-tickets-empty-search';
-            emptyRow.innerHTML = '<td colspan="8" style="text-align:center; padding:2rem; color:var(--fd-text-dim);">🔍 No se encontraron tickets que coincidan con la búsqueda.</td>';
+            emptyRow.innerHTML = '<td colspan="10" style="text-align:center; padding:2rem; color:var(--fd-text-dim);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-right:6px;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>No se encontraron tickets que coincidan con la búsqueda.</td>';
             const tbody = document.getElementById('all-tickets-tbody');
             if (tbody) tbody.appendChild(emptyRow);
         } else {
@@ -1195,7 +1627,7 @@ function filterMyRequests(query) {
         if (!emptyRow) {
             emptyRow = document.createElement('tr');
             emptyRow.id = 'my-requests-empty-search';
-            emptyRow.innerHTML = '<td colspan="8" style="text-align:center; padding:2rem; color:var(--fd-text-dim);">🔍 No se encontraron solicitudes que coincidan con la búsqueda.</td>';
+            emptyRow.innerHTML = '<td colspan="8" style="text-align:center; padding:2rem; color:var(--fd-text-dim);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-right:6px;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>No se encontraron solicitudes que coincidan con la búsqueda.</td>';
             const tbody = document.querySelector('#my-requests-table tbody');
             if (tbody) tbody.appendChild(emptyRow);
         } else {
@@ -1223,7 +1655,7 @@ function filterInboxTickets(query) {
         if (!emptyRow) {
             emptyRow = document.createElement('tr');
             emptyRow.id = 'inbox-empty-search';
-            emptyRow.innerHTML = '<td colspan="6" style="text-align:center; padding:2rem; color:var(--fd-text-dim);">🔍 No se encontraron tickets pendientes que coincidan con la búsqueda.</td>';
+            emptyRow.innerHTML = '<td colspan="6" style="text-align:center; padding:2rem; color:var(--fd-text-dim);"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-right:6px;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>No se encontraron tickets pendientes que coincidan con la búsqueda.</td>';
             const tbody = document.getElementById('unassigned-tickets-tbody');
             if (tbody) tbody.appendChild(emptyRow);
         } else {
@@ -1255,6 +1687,22 @@ async function loadNotifications() {
     }
 }
 
+function getNotifIconSvg(iconType) {
+    switch (iconType) {
+        case 'inbox':
+            return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>';
+        case 'alert':
+            return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#DC2626" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+        case 'star':
+            return '<svg width="15" height="15" viewBox="0 0 24 24" fill="#F59E0B" stroke="#D97706" stroke-width="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>';
+        case 'comment':
+        case 'message':
+            return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#059669" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+        default:
+            return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#64748B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>';
+    }
+}
+
 function updateNotificationUI(notifications, unreadCount) {
     const badge = document.getElementById('topbar-notif-badge');
     const list = document.getElementById('topbar-notif-list');
@@ -1275,13 +1723,13 @@ function updateNotificationUI(notifications, unreadCount) {
 
     if (list) {
         if (!notifications || notifications.length === 0) {
-            list.innerHTML = '<div class="fd-notif-empty">✨ No tienes notificaciones pendientes.</div>';
+            list.innerHTML = '<div class="fd-notif-empty">No tienes notificaciones pendientes.</div>';
             return;
         }
 
         list.innerHTML = notifications.map(n => `
             <div class="fd-notif-item unread" onclick="handleNotificationClick(${n.ticket_id})">
-                <div class="fd-notif-icon">${n.icon || '📌'}</div>
+                <div class="fd-notif-icon">${getNotifIconSvg(n.icon)}</div>
                 <div class="fd-notif-content">
                     <div class="fd-notif-title">${escapeHtml(n.title)}</div>
                     <div class="fd-notif-desc">${escapeHtml(n.message)}</div>
@@ -1327,7 +1775,9 @@ async function toggleUserRole(userId, newRoleId) {
         const result = await response.json();
         if (result.success) {
             showToast(result.message, 'success');
-            setTimeout(() => location.reload(), 1000);
+            setTimeout(() => {
+                window.location.href = 'index.php?tab=admin-tab';
+            }, 1000);
         } else {
             showToast(result.message, 'error');
         }
@@ -1341,12 +1791,328 @@ function escapeHtml(str) {
     return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+async function saveModalSharePointChanges() {
+    if (!currentTicketData || !currentTicketData.id) {
+        showToast('No hay un ticket cargado actualmente.', 'error');
+        return;
+    }
+
+    const ticketId = currentTicketData.id;
+    const title = (document.getElementById('modal-sp-title-input')?.value || '').trim();
+    const companyName = (document.getElementById('modal-sp-company-input')?.value || '').trim();
+    const areaCode = (document.getElementById('modal-sp-area-select')?.value || 'IT').trim();
+    const responsable = (document.getElementById('modal-sp-responsable-input')?.value || '').trim();
+    const observations = (document.getElementById('modal-sp-observations-input')?.value || '').trim();
+    const spStatus = (document.getElementById('modal-sp-status-select')?.value || 'Pendiente').trim();
+    const priority = (document.getElementById('modal-prop-priority-select')?.value || 'medium').trim();
+
+    if (!title) {
+        showToast('El asunto de la solicitud no puede estar vacío.', 'error');
+        return;
+    }
+
+    const btn = document.getElementById('btn-save-sharepoint-modal');
+    const feedback = document.getElementById('modal-sp-save-feedback');
+    const originalBtnText = btn ? btn.innerHTML : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-right:6px;"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>Guardar Cambios';
+
+    try {
+        if (btn) {
+            btn.disabled = true;
+            btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="spin" style="vertical-align:-2px; margin-right:6px;"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>Guardando...';
+        }
+        if (feedback) {
+            feedback.style.display = 'block';
+            feedback.style.background = '#EFF6FF';
+            feedback.style.color = '#1E40AF';
+            feedback.textContent = 'Guardando cambios del ticket...';
+        }
+
+        const csrfToken = getCsrfToken();
+
+        const payload = {
+            ticket_id: ticketId,
+            title: title,
+            company_name: companyName,
+            area_code: areaCode,
+            responsable: responsable,
+            observations: observations,
+            sp_status: spStatus,
+            priority: priority,
+            csrf_token: csrfToken
+        };
+
+        const response = await fetch('api.php?action=update_sharepoint_ticket', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken
+            },
+            body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (result.success && result.ticket) {
+            const updated = result.ticket;
+            currentTicketData = updated;
+
+            // 1. Actualizar cabecera del modal
+            const modalTitleEl = document.getElementById('modal-ticket-title');
+            if (modalTitleEl) modalTitleEl.textContent = `${updated.code}: ${updated.title}`;
+
+            const statusPill = document.getElementById('modal-ticket-status-pill');
+            if (statusPill) {
+                statusPill.textContent = updated.sp_status;
+                let statusClass = 'fd-status-pendiente';
+                const lowerStatus = (updated.sp_status || '').toLowerCase();
+                if (lowerStatus.includes('procesado')) statusClass = 'fd-status-procesado';
+                else if (lowerStatus.includes('en proceso') || lowerStatus.includes('en_proceso')) statusClass = 'fd-status-en-proceso';
+                else if (lowerStatus.includes('stand by') || lowerStatus.includes('stand_by')) statusClass = 'fd-status-stand-by';
+                statusPill.className = `fd-status-badge ${statusClass}`;
+            }
+
+            // Sincronizar selectores del modal con los datos guardados
+            const propSelect = document.getElementById('modal-prop-status-select');
+            if (propSelect) propSelect.value = updated.status_id;
+            const spSelect = document.getElementById('modal-sp-status-select');
+            if (spSelect) spSelect.value = updated.sp_status;
+
+            // 2. Mover tarjeta en el Tablero Kanban
+            const card = document.querySelector(`.ticket-card[data-ticket-id="${ticketId}"]`);
+            const targetContainer = document.querySelector(`.tickets-container[data-status-id="${updated.status_id}"]`);
+            if (card && targetContainer && card.parentElement !== targetContainer) {
+                targetContainer.appendChild(card);
+                if (typeof updateColumnCounters === 'function') updateColumnCounters();
+            }
+
+            // 3. Actualizar la fila en la tabla de Todos los tickets
+            const row = document.querySelector(`#all-tickets-tbody tr[data-ticket-id="${ticketId}"]`);
+            if (row) {
+                row.dataset.statusId = updated.status_id;
+                row.dataset.title = (updated.title || '').toLowerCase();
+                row.dataset.company = (updated.company_name || '').toLowerCase();
+                row.dataset.areaName = (updated.area_code || '').toLowerCase();
+                row.dataset.responsable = (updated.responsable || 'sin asignar').toLowerCase();
+                row.dataset.observations = (updated.observations || '').toLowerCase();
+                row.dataset.spStatus = (updated.sp_status || '').toLowerCase();
+                row.dataset.statusName = (updated.sp_status || '').toLowerCase();
+
+                const link = row.querySelector('.fd-ticket-link');
+                if (link) link.textContent = updated.title;
+
+                const cells = row.querySelectorAll('td');
+                if (cells.length >= 8) {
+                    // Celda 2: Empresa
+                    cells[1].innerHTML = `<div style="font-weight:600; color:#1E293B; font-size:13px;">${escapeHtml(updated.company_name || 'N/A')}</div>`;
+
+                    // Celda 3: Área
+                    const aCode = (updated.area_code || 'IT').toUpperCase();
+                    const aClass = (aCode === 'SSGG') ? 'fd-area-ssgg' : 'fd-area-it';
+                    const aIcon = (aCode === 'SSGG') 
+                        ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>' 
+                        : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
+                    cells[2].innerHTML = `<span class="fd-area-badge ${aClass}">${aIcon}${escapeHtml(aCode)}</span>`;
+
+                    // Celda 4: Responsable
+                    const respDisplay = updated.responsable ? escapeHtml(updated.responsable) : '<em style="color:#94a3b8">Sin Asignar</em>';
+                    cells[3].innerHTML = `<span class="agent-name-display" style="font-weight:500; font-size:12px; color:#334155;">${respDisplay}</span>`;
+
+                    // Celda 5: Observaciones
+                    const obsDisplay = updated.observations ? escapeHtml(updated.observations) : '<span style="color:#CBD5E1;">—</span>';
+                    cells[4].innerHTML = `<div class="fd-observations-cell" title="${escapeHtml(updated.observations || '')}">${obsDisplay}</div>`;
+
+                    // Celda 6: Estatus
+                    let stClass = 'fd-status-pendiente';
+                    const stLower = (updated.sp_status || '').toLowerCase();
+                    if (stLower.includes('procesado')) stClass = 'fd-status-procesado';
+                    else if (stLower.includes('en proceso') || stLower.includes('en_proceso')) stClass = 'fd-status-en-proceso';
+                    else if (stLower.includes('stand by') || stLower.includes('stand_by')) stClass = 'fd-status-stand-by';
+                    cells[5].innerHTML = `<span class="fd-status-badge ${stClass}">${escapeHtml(updated.sp_status)}</span>`;
+
+                    // Celda 9: Fecha Cierre (si está en la tabla de 10 columnas)
+                    if (cells.length >= 10 && updated.resolved_at !== undefined) {
+                        cells[8].innerHTML = updated.resolved_at ? escapeHtml(updated.resolved_at.substring(0, 16)) : '<span style="color:#CBD5E1;">—</span>';
+                    }
+                }
+            }
+
+            // Actualizar pill de prioridad si cambió
+            const prioPill = document.getElementById('modal-ticket-prio-pill');
+            if (prioPill && updated.priority) {
+                prioPill.textContent = updated.priority;
+                prioPill.className = `fd-prio-badge fd-prio-${updated.priority}`;
+            }
+
+            if (feedback) {
+                feedback.style.display = 'block';
+                feedback.style.background = '#ECFDF5';
+                feedback.style.color = '#065F46';
+                feedback.innerHTML = '<span style="display:inline-flex; align-items:center; gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>¡Cambios guardados exitosamente!</span>';
+                setTimeout(() => {
+                    feedback.style.display = 'none';
+                }, 4000);
+            }
+            showToast('Ticket actualizado exitosamente.', 'success');
+        } else {
+            if (feedback) {
+                feedback.style.display = 'block';
+                feedback.style.background = '#FEF2F2';
+                feedback.style.color = '#991B1B';
+                feedback.innerHTML = '<span style="display:inline-flex; align-items:center; gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>' + escapeHtml(result.message || 'Error al guardar los cambios.') + '</span>';
+            }
+            showToast(result.message || 'Error al actualizar el ticket.', 'error');
+        }
+    } catch (e) {
+        if (feedback) {
+            feedback.style.display = 'block';
+            feedback.style.background = '#FEF2F2';
+            feedback.style.color = '#991B1B';
+            feedback.innerHTML = '<span style="display:inline-flex; align-items:center; gap:6px;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>Error de red: ' + escapeHtml(e.message) + '</span>';
+        }
+        showToast('Error de conexión al guardar.', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalBtnText;
+        }
+    }
+}
+
+async function exportCurrentTicketToSharePoint(ticketId) {
+    if (!confirm('¿Desea crear este registro en la lista de producción de SharePoint y vincular su ID?')) {
+        return;
+    }
+    const btn = document.getElementById('btn-export-to-sharepoint');
+    const originalText = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="spin" style="margin-right:4px;"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/></svg>Vinculando...';
+    }
+
+    try {
+        const response = await fetch('api.php?action=export_ticket_to_sharepoint', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': getCsrfToken()
+            },
+            body: JSON.stringify({ ticket_id: ticketId, csrf_token: getCsrfToken() })
+        });
+        const result = await response.json();
+        if (result.success) {
+            showToast(result.message, 'success');
+            await openTicketModal(ticketId);
+            setTimeout(() => {
+                window.location.reload();
+            }, 1200);
+        } else {
+            showToast(result.message, 'error');
+        }
+    } catch (e) {
+        showToast('Error de red al conectar con SharePoint.', 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    }
+}
+
+/**
+ * Eliminar un ticket con confirmación interactiva y actualización reactiva de la interfaz
+ */
+async function deleteTicket(ticketId, ticketCode, sharepointId) {
+    if (!ticketId) return;
+    ticketCode = ticketCode || ('#' + ticketId);
+
+    let deleteSharePoint = false;
+    let confirmMsg = `¿Está seguro de que desea eliminar permanentemente el ticket ${ticketCode}?`;
+    if (sharepointId && parseInt(sharepointId) > 0) {
+        confirmMsg += `\n\nEste ticket está vinculado a SharePoint (ID #${sharepointId}).\n¿Desea solicitar también la eliminación del registro en SharePoint?`;
+        deleteSharePoint = true;
+    }
+    confirmMsg += `\n\nEsta acción eliminará el ticket, sus comentarios y su historial de auditoría. No se puede revertir.`;
+
+    if (!confirm(confirmMsg)) {
+        return;
+    }
+
+    try {
+        const response = await fetch('api.php?action=delete_ticket', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': getCsrfToken()
+            },
+            body: JSON.stringify({
+                ticket_id: parseInt(ticketId, 10),
+                delete_sharepoint: deleteSharePoint,
+                csrf_token: getCsrfToken()
+            })
+        });
+
+        let result;
+        try {
+            result = await response.json();
+        } catch (jsonErr) {
+            console.error('Error parseando JSON de eliminación:', jsonErr);
+            showToast('El ticket fue procesado en el servidor.', 'info');
+            return;
+        }
+
+        if (result && result.success) {
+            showToast(result.message || `Ticket ${ticketCode} eliminado con éxito.`, 'success');
+
+            try {
+                // Cerrar el modal si estaba abierto con este ticket
+                const modal = document.getElementById('ticket-modal');
+                const modalIdInput = document.getElementById('modal-ticket-id-input');
+                if (modal && modalIdInput && parseInt(modalIdInput.value) === parseInt(ticketId, 10)) {
+                    modal.style.display = 'none';
+                }
+
+                // Remover elementos del DOM en todas las tablas y en el kanban
+                document.querySelectorAll(`tr[data-ticket-id="${ticketId}"]`).forEach(el => el.remove());
+                document.querySelectorAll(`.ticket-card[data-ticket-id="${ticketId}"]`).forEach(el => el.remove());
+
+                // Actualizar tablas y paginación si las funciones están disponibles
+                if (typeof filterTicketsGlobal === 'function') {
+                    filterTicketsGlobal();
+                }
+                if (typeof filterMyRequests === 'function') {
+                    filterMyRequests();
+                }
+            } catch (uiErr) {
+                console.warn('Actualización de DOM tras eliminar:', uiErr);
+            }
+        } else {
+            showToast(result ? result.message : 'Error al eliminar el ticket.', 'error');
+        }
+    } catch (e) {
+        console.error('Error en deleteTicket:', e);
+        showToast('Error de conexión al intentar eliminar el ticket.', 'error');
+    }
+}
+
+
+function deleteCurrentModalTicket() {
+    if (!currentTicketData || !currentTicketData.id) return;
+    deleteTicket(currentTicketData.id, currentTicketData.code, currentTicketData.sharepoint_id);
+}
+
+window.syncModalStatusFromId = syncModalStatusFromId;
+window.syncModalStatusFromName = syncModalStatusFromName;
+window.handleDetailStatusChange = handleDetailStatusChange;
 window.openCsatModal = openCsatModal;
 window.closeCsatModal = closeCsatModal;
 window.selectCsatRating = selectCsatRating;
 window.pickupTicket = pickupTicket;
 window.openAssignAgentDialog = openAssignAgentDialog;
 window.openTicketModal = openTicketModal;
+window.saveModalSharePointChanges = saveModalSharePointChanges;
+window.exportCurrentTicketToSharePoint = exportCurrentTicketToSharePoint;
+window.deleteTicket = deleteTicket;
+window.deleteCurrentModalTicket = deleteCurrentModalTicket;
 window.loadUnassignedTickets = loadUnassignedTickets;
 window.loadNotifications = loadNotifications;
 window.toggleNotificationsDropdown = toggleNotificationsDropdown;
@@ -1356,3 +2122,16 @@ window.filterTicketsGlobal = filterTicketsGlobal;
 window.filterMyRequests = filterMyRequests;
 window.filterInboxTickets = filterInboxTickets;
 window.showToast = showToast;
+window.initTicketRowClickSelection = initTicketRowClickSelection;
+window.switchAdminSection = switchAdminSection;
+window.filterUsersTable = filterUsersTable;
+window.openCreateUserModal = openCreateUserModal;
+window.closeCreateUserModal = closeCreateUserModal;
+window.openEditUserModal = openEditUserModal;
+window.closeEditUserModal = closeEditUserModal;
+window.openResetPasswordModal = openResetPasswordModal;
+window.closeResetPasswordModal = closeResetPasswordModal;
+window.toggleUserStatus = toggleUserStatus;
+window.deleteUser = deleteUser;
+
+

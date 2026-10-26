@@ -4,9 +4,7 @@
 *.log
 
 # Scripts y datos temporales
-scratch/*.txt
-scratch/cookie*
-scratch/debug_*
+scratch/
 
 # IDE y Sistema Operativo
 .vscode/

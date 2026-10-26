@@ -1,0 +1,74 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sistema_tickets_app
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:80"
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-service_desk_db}
+      DB_USER: ${DB_USER:-root}
+      DB_PASS: ${DB_PASSWORD:-root}
+      SUPERADMIN_NAME: ${SUPERADMIN_NAME:-SuperAdmin Sistema}
+      SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-superadmin@empresa.com}
+      SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-password123}
+    volumes:
+      - .:/var/www/html
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - tickets_network
+
+  db:
+    image: mysql:8.0
+    container_name: sistema_tickets_db
+    restart: unless-stopped
+    command: --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-root}
+      MYSQL_DATABASE: ${DB_NAME:-service_desk_db}
+    ports:
+      - "${DB_PORT:-3306}:3306"
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./sql/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./sql/seeds.sql:/docker-entrypoint-initdb.d/02-seeds.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - tickets_network
+
+  phpmyadmin:
+    image: phpmyadmin:latest
+    container_name: sistema_tickets_phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "${PMA_PORT:-8081}:80"
+    environment:
+      PMA_HOST: db
+      PMA_PORT: 3306
+      PMA_USER: ${DB_USER:-root}
+      PMA_PASSWORD: ${DB_PASSWORD:-root}
+      UPLOAD_LIMIT: 64M
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - tickets_network
+
+volumes:
+  db_data:
+    driver: local
+
+networks:
+  tickets_network:
+    driver: bridge

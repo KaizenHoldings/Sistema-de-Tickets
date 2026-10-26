@@ -10,6 +10,7 @@ require_once __DIR__ . '/../src/Controllers/CommentController.php';
 require_once __DIR__ . '/../src/Controllers/UserController.php';
 require_once __DIR__ . '/../src/Controllers/AreaController.php';
 require_once __DIR__ . '/../src/Controllers/ReportController.php';
+require_once __DIR__ . '/../src/Services/SharePointService.php';
 
 use Middleware\AuthMiddleware;
 use Controllers\AuthController;
@@ -19,6 +20,7 @@ use Controllers\CommentController;
 use Controllers\UserController;
 use Controllers\AreaController;
 use Controllers\ReportController;
+use Services\SharePointService;
 
 AuthMiddleware::startSession();
 
@@ -45,7 +47,40 @@ try {
     if ($action === 'export_tickets_csv') {
         $currentUser = AuthMiddleware::requireAuth();
         $controller = new ReportController();
-        $controller->exportTicketsCSV($currentUser);
+        $area = $_GET['area'] ?? ($_GET['area_code'] ?? '');
+        $controller->exportTicketsCSV($currentUser, $area);
+        exit;
+    }
+
+    if ($action === 'sync_sharepoint') {
+        $currentUser = AuthMiddleware::requireAuth();
+        $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 300;
+        $title = !empty($_GET['title']) ? trim($_GET['title']) : null;
+        $range = !empty($_GET['range']) ? trim($_GET['range']) : 'all';
+        $area = !empty($_GET['area']) ? trim($_GET['area']) : null;
+        $spService = new SharePointService();
+        $result = $spService->syncToDatabase($limit, $title, $range, $area);
+        echo json_encode($result);
+        exit;
+    }
+
+    if ($action === 'clear_all_tickets') {
+        $currentUser = AuthMiddleware::requireAuth();
+        if (($currentUser['role_name'] ?? '') !== 'admin') {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'message' => 'Solo los Superadministradores pueden vaciar la base de tickets.']);
+            exit;
+        }
+
+        $db = \Config\Database::getConnection();
+        $db->exec("SET FOREIGN_KEY_CHECKS = 0;");
+        $db->exec("TRUNCATE TABLE ticket_comments;");
+        $db->exec("TRUNCATE TABLE ticket_audit_logs;");
+        $db->exec("TRUNCATE TABLE ticket_satisfaction_surveys;");
+        $db->exec("TRUNCATE TABLE tickets;");
+        $db->exec("SET FOREIGN_KEY_CHECKS = 1;");
+
+        echo json_encode(['success' => true, 'message' => 'Todos los tickets y su historial han sido eliminados de la base de datos.']);
         exit;
     }
 
@@ -53,7 +88,7 @@ try {
     $currentUser = AuthMiddleware::requireAuth();
 
     // VALIDACIÓN CSRF PARA ACCIONES DE ESCRITURA / MODIFICACIÓN (POST)
-    $isWriteAction = in_array($action, ['create_ticket', 'update_kanban_status', 'update_ticket_properties', 'assign_agent', 'pickup_ticket', 'add_comment', 'create_area', 'create_user', 'toggle_user_role', 'submit_csat'], true);
+    $isWriteAction = in_array($action, ['create_ticket', 'delete_ticket', 'update_kanban_status', 'update_ticket_properties', 'update_sharepoint_ticket', 'export_ticket_to_sharepoint', 'assign_agent', 'pickup_ticket', 'add_comment', 'create_area', 'create_user', 'toggle_user_role', 'submit_csat'], true);
     if ($isWriteAction && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $csrfToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? $input['csrf_token'] ?? '';
         if (!AuthMiddleware::validateCsrfToken($csrfToken)) {
@@ -67,6 +102,25 @@ try {
     if ($action === 'create_ticket') {
         $controller = new TicketController();
         $response = $controller->createTicket($_POST, $_FILES, $currentUser);
+        echo json_encode($response);
+        exit;
+    }
+
+    if ($action === 'delete_ticket') {
+        $controller = new TicketController();
+        $ticketId = (int)($input['ticket_id'] ?? 0);
+        $deleteSharePoint = !empty($input['delete_sharepoint']);
+        $dryRun = !empty($input['dry_run']);
+        $response = $controller->deleteTicket($ticketId, $currentUser, $deleteSharePoint, $dryRun);
+        echo json_encode($response);
+        exit;
+    }
+
+    if ($action === 'export_ticket_to_sharepoint') {
+        $controller = new TicketController();
+        $ticketId = (int)($input['ticket_id'] ?? 0);
+        $dryRun = !empty($input['dry_run']);
+        $response = $controller->exportTicketToSharePoint($ticketId, $currentUser, $dryRun);
         echo json_encode($response);
         exit;
     }
@@ -100,6 +154,22 @@ try {
         $ticketId = (int)($input['ticket_id'] ?? 0);
         $response = $controller->updateProperties($ticketId, $input, $currentUser);
         echo json_encode($response);
+        exit;
+    }
+
+    if ($action === 'update_sharepoint_ticket') {
+        $controller = new TicketController();
+        $ticketId = (int)($input['ticket_id'] ?? 0);
+        $response = $controller->updateSharePointTicket($ticketId, $input, $currentUser);
+        echo json_encode($response);
+        exit;
+    }
+
+    if ($action === 'get_sharepoint_item') {
+        $itemId = (int)($_GET['item_id'] ?? 0);
+        $spService = new SharePointService();
+        $fields = $spService->getSharePointItem($itemId);
+        echo json_encode(['success' => ($fields !== null), 'fields' => $fields]);
         exit;
     }
 
@@ -160,6 +230,19 @@ try {
         exit;
     }
 
+    if ($action === 'get_reports_analytics') {
+        $controller = new ReportController();
+        $filterOptions = [
+            'period' => $_GET['period'] ?? 'all',
+            'responsable' => $_GET['responsable'] ?? '',
+            'area' => $_GET['area'] ?? ($_GET['area_code'] ?? 'all'),
+            'area_id' => isset($_GET['area_id']) ? (int)$_GET['area_id'] : (($currentUser['role_name'] === 'admin') ? 0 : (int)($currentUser['area_id'] ?? 0))
+        ];
+        $response = $controller->getReportsAnalytics($currentUser, $filterOptions);
+        echo json_encode($response);
+        exit;
+    }
+
     if ($action === 'get_my_requests') {
         $controller = new TicketController();
         $response = $controller->getMyRequestedTickets((int)$currentUser['id']);
@@ -211,6 +294,52 @@ try {
         exit;
     }
 
+    if ($action === 'update_user') {
+        AuthMiddleware::requireRoles(['admin']);
+        $controller = new UserController();
+        $targetUserId = (int)($input['user_id'] ?? 0);
+        $response = $controller->updateUser($targetUserId, $input, $currentUser);
+        echo json_encode($response);
+        exit;
+    }
+
+    if ($action === 'toggle_user_status') {
+        AuthMiddleware::requireRoles(['admin']);
+        $controller = new UserController();
+        $targetUserId = (int)($input['user_id'] ?? 0);
+        $response = $controller->toggleUserStatus($targetUserId, $currentUser);
+        echo json_encode($response);
+        exit;
+    }
+
+    if ($action === 'reset_user_password') {
+        AuthMiddleware::requireRoles(['admin']);
+        $controller = new UserController();
+        $targetUserId = (int)($input['user_id'] ?? 0);
+        $newPassword = (string)($input['new_password'] ?? '');
+        $response = $controller->resetPassword($targetUserId, $newPassword, $currentUser);
+        echo json_encode($response);
+        exit;
+    }
+
+    if ($action === 'delete_user') {
+        AuthMiddleware::requireRoles(['admin']);
+        $controller = new UserController();
+        $targetUserId = (int)($input['user_id'] ?? 0);
+        $response = $controller->deleteUser($targetUserId, $currentUser);
+        echo json_encode($response);
+        exit;
+    }
+
+    if ($action === 'get_user') {
+        AuthMiddleware::requireRoles(['admin']);
+        $controller = new UserController();
+        $userId = (int)($_GET['user_id'] ?? 0);
+        $response = $controller->getUserById($userId);
+        echo json_encode($response);
+        exit;
+    }
+
     if ($action === 'toggle_user_role') {
         AuthMiddleware::requireRoles(['admin']);
         $controller = new UserController();
@@ -257,7 +386,7 @@ try {
                 'message' => $row['title'] . ' (' . $row['area_name'] . ')',
                 'time' => $row['created_at'],
                 'priority' => $row['priority'],
-                'icon' => '📥'
+                'icon' => 'inbox'
             ];
         }
 
@@ -281,7 +410,7 @@ try {
                 'message' => 'Ticket fuera de tiempo de resolución: ' . $row['title'],
                 'time' => $row['created_at'],
                 'priority' => $row['priority'],
-                'icon' => '⚠️'
+                'icon' => 'alert'
             ];
         }
 
@@ -304,7 +433,7 @@ try {
                 'message' => 'Tu ticket fue resuelto. ¡Califica la atención recibida!',
                 'time' => $row['resolved_at'] ?? date('Y-m-d H:i:s'),
                 'priority' => 'medium',
-                'icon' => '⭐'
+                'icon' => 'star'
             ];
         }
 
@@ -330,7 +459,7 @@ try {
                 'message' => $row['commenter_name'] . ': ' . substr($row['comment'], 0, 60) . '...',
                 'time' => $row['created_at'],
                 'priority' => 'low',
-                'icon' => '💬'
+                'icon' => 'message'
             ];
         }
 

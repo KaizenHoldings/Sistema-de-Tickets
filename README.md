@@ -5,6 +5,7 @@ Sistema web completo de mesa de ayuda y gestión de tickets desarrollado en PHP 
 ## 🚀 Características Principales
 
 - **Gestión de Tickets:** Creación, edición, cambio de estado en tiempo real y vista en tablero Kanban.
+- **Integración con SharePoint:** Sincronización automática y bajo demanda con la lista corporativa de SharePoint `Solicitudes - SSGG e IT` vía Microsoft Graph API (solo lectura `GET`).
 - **Roles y Permisos:**
   - **Administrador:** Control total del sistema, gestión de usuarios, roles, métricas globales.
   - **Técnico:** Asignación de tickets, resolución, comentarios técnicos y actualización de avance.
@@ -17,12 +18,29 @@ Sistema web completo de mesa de ayuda y gestión de tickets desarrollado en PHP 
 
 ## 🛠️ Requisitos Previos
 
-- **XAMPP** (o cualquier entorno con Apache y PHP 8.0+ y MySQL/MariaDB).
+- **Opción A (Recomendada):** [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Docker Compose v2+).
+- **Opción B:** **XAMPP** (Apache, PHP 8.0+ y MySQL/MariaDB).
 - Navegador web moderno (Chrome, Edge, Firefox).
 
 ---
 
-## 📦 Instalación y Puesta en Marcha
+## 🐳 Puesta en Marcha con Docker Compose (Rápido)
+
+1. **Iniciar los Contenedores:**
+   Ejecuta en la raíz del proyecto:
+   ```bash
+   docker compose up -d --build
+   ```
+
+2. **Acceder a los Servicios:**
+   - **Aplicación Web:** [http://localhost:8080](http://localhost:8080)
+   - **phpMyAdmin:** [http://localhost:8081](http://localhost:8081) (Usuario: `root`, Contraseña: `root`)
+
+> Las tablas y semillas de prueba (`sql/schema.sql` y `sql/seeds.sql`) se importan automáticamente al crear el contenedor de MySQL.
+
+---
+
+## 📦 Puesta en Marcha Tradicional (XAMPP)
 
 1. **Ubicación del Proyecto:**
    Colocar la carpeta del proyecto dentro de la carpeta `htdocs` de XAMPP:
@@ -35,7 +53,7 @@ Sistema web completo de mesa de ayuda y gestión de tickets desarrollado en PHP 
 
 3. **Configuración de Base de Datos:**
    - Entrar a [phpMyAdmin](http://localhost/phpmyadmin/).
-   - Crear una base de datos llamada `service_desk_db` (o el nombre que prefieras).
+   - Crear una base de datos llamada `service_desk_db`.
    - Importar en orden los archivos ubicados en la carpeta `sql/`:
      1. `sql/schema.sql` (Estructura de tablas)
      2. `sql/seeds.sql` (Datos iniciales y usuarios de prueba)
