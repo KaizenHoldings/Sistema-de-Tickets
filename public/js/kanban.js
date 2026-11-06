@@ -1229,6 +1229,16 @@ async function openTicketModal(ticketId) {
                 dueDateEl.textContent = ticket.due_date ? ticket.due_date.substring(0, 16) : '—';
             }
 
+            // Inputs editables de fechas en propiedades de modal
+            const createdInput = document.getElementById('modal-sp-created-input');
+            if (createdInput) {
+                createdInput.value = ticket.created_at ? ticket.created_at.substring(0, 10) : '';
+            }
+            const dueInput = document.getElementById('modal-sp-due-input');
+            if (dueInput) {
+                dueInput.value = ticket.due_date ? ticket.due_date.substring(0, 10) : '';
+            }
+
             const resolvedDateEl = document.getElementById('modal-ticket-resolved-date');
             const resolvedPill = document.getElementById('modal-resolved-date-pill');
             if (resolvedDateEl) {
@@ -1866,6 +1876,8 @@ async function saveModalSharePointChanges() {
         }
 
         const csrfToken = getCsrfToken();
+        const reqDateVal = document.getElementById('modal-sp-created-input')?.value || '';
+        const dueDateVal = document.getElementById('modal-sp-due-input')?.value || '';
 
         const payload = {
             ticket_id: ticketId,
@@ -1876,6 +1888,8 @@ async function saveModalSharePointChanges() {
             observations: observations,
             sp_status: spStatus,
             priority: priority,
+            request_date: reqDateVal,
+            due_date: dueDateVal,
             csrf_token: csrfToken
         };
 
@@ -1966,6 +1980,16 @@ async function saveModalSharePointChanges() {
                     else if (stLower.includes('en proceso') || stLower.includes('en_proceso')) stClass = 'fd-status-en-proceso';
                     else if (stLower.includes('stand by') || stLower.includes('stand_by')) stClass = 'fd-status-stand-by';
                     cells[5].innerHTML = `<span class="fd-status-badge ${stClass}">${escapeHtml(updated.sp_status)}</span>`;
+
+                    // Celda 7: Fecha Solicitud
+                    if (cells.length >= 7 && updated.created_at) {
+                        cells[6].innerHTML = escapeHtml(updated.created_at.substring(0, 10));
+                    }
+
+                    // Celda 8: Fecha Propuesta
+                    if (cells.length >= 8 && updated.due_date !== undefined) {
+                        cells[7].innerHTML = updated.due_date ? escapeHtml(updated.due_date.substring(0, 10)) : '<span style="color:#CBD5E1;">—</span>';
+                    }
 
                     // Celda 9: Fecha Cierre (si está en la tabla de 10 columnas)
                     if (cells.length >= 10 && updated.resolved_at !== undefined) {

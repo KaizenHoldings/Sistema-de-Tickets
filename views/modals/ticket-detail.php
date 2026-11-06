@@ -106,6 +106,18 @@
                             <option value="SSGG">SSGG (Servicios Generales)</option>
                         </select>
                     </div>
+
+                    <!-- 6. Fecha de Solicitud -->
+                    <div class="fd-prop-group">
+                        <label for="modal-sp-created-input">Fecha Solicitud:</label>
+                        <input type="date" id="modal-sp-created-input" class="fd-filter-input" style="width:100%; min-height:36px; padding:0.45rem 0.6rem; font-size:13px; border-radius:6px; border:1px solid #CBD5E1;">
+                    </div>
+
+                    <!-- 7. Fecha Propuesta -->
+                    <div class="fd-prop-group">
+                        <label for="modal-sp-due-input">Fecha Propuesta:</label>
+                        <input type="date" id="modal-sp-due-input" class="fd-filter-input" style="width:100%; min-height:36px; padding:0.45rem 0.6rem; font-size:13px; border-radius:6px; border:1px solid #CBD5E1;">
+                    </div>
                 </div>
 
                 <!-- FILA DE ASUNTO, OBSERVACIONES Y ACCIÓN DE GUARDADO -->

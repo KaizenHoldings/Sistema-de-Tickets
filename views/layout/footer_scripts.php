@@ -329,6 +329,12 @@
             submitBtn.style.cursor = 'pointer';
             submitBtn.innerHTML = 'Guardar Solicitud';
         }
+        const today = new Date().toISOString().split('T')[0];
+        const reqDateInput = document.getElementById('create_request_date');
+        if (reqDateInput && !reqDateInput.value) reqDateInput.value = today;
+        const dueDateInput = document.getElementById('create_due_date');
+        if (dueDateInput && !dueDateInput.value) dueDateInput.value = today;
+
         document.getElementById('create-ticket-modal').style.display = 'flex';
     }
 

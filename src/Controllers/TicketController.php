@@ -148,6 +148,13 @@ class TicketController {
             $spId = null;
             $spNotice = '';
 
+            // Fechas de Solicitud y Propuesta (por defecto la fecha del día)
+            $rawReqDate = $data['request_date'] ?? null;
+            $requestDate = !empty($rawReqDate) ? date('Y-m-d H:i:s', strtotime($rawReqDate)) : date('Y-m-d H:i:s');
+
+            $rawDueDate = $data['due_date'] ?? null;
+            $dueDate = !empty($rawDueDate) ? date('Y-m-d H:i:s', strtotime($rawDueDate)) : $requestDate;
+
             // OPCIÓN DE CREACIÓN DIRECTA EN SHAREPOINT (PRODUCCIÓN / LOCAL)
             if ($syncSharePoint) {
                 try {
@@ -159,6 +166,8 @@ class TicketController {
                         'responsable'  => $responsable ?: '',
                         'observations' => $observations,
                         'sp_status'    => $spStatus,
+                        'request_date' => $requestDate,
+                        'due_date'     => $dueDate,
                         'dry_run'      => $isDryRun
                     ]);
 
@@ -188,12 +197,12 @@ class TicketController {
                     sharepoint_id, code, title, company_name, area_code, 
                     responsable, observations, sp_status, description, priority, 
                     status_id, area_id, requester_id, assigned_agent_id, 
-                    due_date, attachment_path
+                    due_date, created_at, attachment_path
                 ) VALUES (
                     :sharepoint_id, :code, :title, :company_name, :area_code, 
                     :responsable, :observations, :sp_status, :description, :priority, 
                     :status_id, :area_id, :requester_id, :assigned_agent_id, 
-                    :due_date, :attachment_path
+                    :due_date, :created_at, :attachment_path
                 )
             ");
 
@@ -213,6 +222,7 @@ class TicketController {
                 ':requester_id'       => $currentUser['id'],
                 ':assigned_agent_id'  => $assignedAgentId,
                 ':due_date'           => $dueDate,
+                ':created_at'         => $requestDate,
                 ':attachment_path'    => $attachmentPath
             ]);
 
@@ -772,6 +782,22 @@ class TicketController {
                 } else {
                     $dbUpdates[] = "resolved_at = NULL";
                 }
+            }
+
+            // 7. Fecha de Solicitud (field_6)
+            if (isset($data['request_date']) && trim($data['request_date']) !== '') {
+                $reqDate = date('Y-m-d H:i:s', strtotime($data['request_date']));
+                $spPayload['request_date'] = $reqDate;
+                $dbUpdates[] = "created_at = :created_at";
+                $dbParams[':created_at'] = $reqDate;
+            }
+
+            // 8. Fecha Propuesta (field_7)
+            if (isset($data['due_date'])) {
+                $dueDate = trim($data['due_date']) !== '' ? date('Y-m-d H:i:s', strtotime($data['due_date'])) : null;
+                $spPayload['due_date'] = $dueDate;
+                $dbUpdates[] = "due_date = :due_date";
+                $dbParams[':due_date'] = $dueDate;
             }
 
             if (empty($spPayload)) {

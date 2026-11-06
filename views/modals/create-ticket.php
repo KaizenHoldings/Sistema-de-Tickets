@@ -62,23 +62,31 @@
                 </div>
             </div>
 
-            <!-- FILA 3: PRIORIDAD Y FECHA PROPUESTA -->
+            <!-- FILA 3: PRIORIDAD -->
+            <div class="form-group">
+                <label for="create_priority" style="font-weight:600; color:#1E293B;">Prioridad:</label>
+                <select name="priority" id="create_priority" class="form-control">
+                    <option value="low">Baja (Requerimiento de rutina)</option>
+                    <option value="medium" selected>Media (Impacto regular)</option>
+                    <option value="high">Alta (Impacto importante)</option>
+                    <option value="urgent">Urgente (Bloqueo crítico)</option>
+                </select>
+            </div>
+
+            <!-- FILA 4: FECHAS DE GESTIÓN -->
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
-                <!-- 6. PRIORIDAD -->
+                <!-- FECHA DE SOLICITUD -->
                 <div class="form-group">
-                    <label for="create_priority" style="font-weight:600; color:#1E293B;">Prioridad:</label>
-                    <select name="priority" id="create_priority" class="form-control">
-                        <option value="low">Baja (Requerimiento de rutina)</option>
-                        <option value="medium" selected>Media (Impacto regular)</option>
-                        <option value="high">Alta (Impacto importante)</option>
-                        <option value="urgent">Urgente (Bloqueo crítico)</option>
-                    </select>
+                    <label for="create_request_date" style="font-weight:600; color:#1E293B;">Fecha de Solicitud: <span style="color:#DC2626;">*</span></label>
+                    <input type="date" name="request_date" id="create_request_date" class="form-control" value="<?= date('Y-m-d') ?>" required style="padding:0.5rem 0.75rem;">
+                    <small style="color:#64748B; font-size:11px;">Por defecto la fecha del día.</small>
                 </div>
 
-                <!-- 7. FECHA PROPUESTA -->
+                <!-- FECHA PROPUESTA -->
                 <div class="form-group">
-                    <label for="create_due_date" style="font-weight:600; color:#1E293B;">Fecha Propuesta (Límite):</label>
-                    <input type="datetime-local" name="due_date" id="create_due_date" class="form-control">
+                    <label for="create_due_date" style="font-weight:600; color:#1E293B;">Fecha Propuesta: <span style="color:#DC2626;">*</span></label>
+                    <input type="date" name="due_date" id="create_due_date" class="form-control" value="<?= date('Y-m-d') ?>" required style="padding:0.5rem 0.75rem;">
+                    <small style="color:#64748B; font-size:11px;">Fecha estimada o límite acordada.</small>
                 </div>
             </div>
 

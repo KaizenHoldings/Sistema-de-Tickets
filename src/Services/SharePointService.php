@@ -472,7 +472,8 @@ class SharePointService {
                 requester_id = :requester_id,
                 assigned_agent_id = :assigned_agent_id,
                 due_date = :due_date,
-                resolved_at = :resolved_at
+                resolved_at = :resolved_at,
+                created_at = :created_at
             WHERE sharepoint_id = :sp_id
         ");
 
@@ -643,6 +644,7 @@ class SharePointService {
                     ':assigned_agent_id' => $assignedAgentId,
                     ':due_date'          => $dueDate,
                     ':resolved_at'       => $resolvedAt,
+                    ':created_at'        => $createdAt,
                     ':sp_id'             => $spId,
                 ]);
                 $updated++;
@@ -757,6 +759,22 @@ class SharePointService {
                 'field_5' => trim((string)($data['sp_status'] ?? 'Pendiente'))
             ];
 
+            // Fecha de Solicitud (field_6)
+            $reqDate = !empty($data['request_date']) ? strtotime($data['request_date']) : time();
+            $fieldsPayload['field_6'] = gmdate('Y-m-d\TH:i:s\Z', $reqDate);
+
+            // Fecha Propuesta (field_7)
+            if (!empty($data['due_date'])) {
+                $fieldsPayload['field_7'] = gmdate('Y-m-d\TH:i:s\Z', strtotime($data['due_date']));
+            } else {
+                $fieldsPayload['field_7'] = gmdate('Y-m-d\TH:i:s\Z', $reqDate);
+            }
+
+            // Fecha de Cierre si ya viene Procesado (field_8)
+            if ($fieldsPayload['field_5'] === 'Procesado') {
+                $fieldsPayload['field_8'] = gmdate('Y-m-d\TH:i:s\Z');
+            }
+
             if (!empty($data['responsable'])) {
                 $fieldsPayload['field_2'] = trim((string)$data['responsable']);
             }
@@ -845,6 +863,23 @@ class SharePointService {
             }
             if (isset($updatedFields['sp_status'])) {
                 $fieldsPayload['field_5'] = trim((string)$updatedFields['sp_status']);
+                if ($fieldsPayload['field_5'] === 'Procesado') {
+                    $fieldsPayload['field_8'] = gmdate('Y-m-d\TH:i:s\Z');
+                }
+            }
+
+            // Fecha de Solicitud (field_6)
+            if (!empty($updatedFields['request_date'])) {
+                $fieldsPayload['field_6'] = gmdate('Y-m-d\TH:i:s\Z', strtotime($updatedFields['request_date']));
+            }
+
+            // Fecha Propuesta (field_7)
+            if (array_key_exists('due_date', $updatedFields)) {
+                if (!empty($updatedFields['due_date'])) {
+                    $fieldsPayload['field_7'] = gmdate('Y-m-d\TH:i:s\Z', strtotime($updatedFields['due_date']));
+                } else {
+                    $fieldsPayload['field_7'] = null;
+                }
             }
 
             if (empty($fieldsPayload)) {
