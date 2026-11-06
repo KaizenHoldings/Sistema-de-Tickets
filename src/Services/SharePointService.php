@@ -44,11 +44,11 @@ class SharePointService {
             }
         }
 
-        $this->tenantId = getenv('GRAPH_TENANT_ID') ?: ($envMap['GRAPH_TENANT_ID'] ?? '');
-        $this->clientId = getenv('GRAPH_CLIENT_ID') ?: ($envMap['GRAPH_CLIENT_ID'] ?? '');
-        $this->clientSecret = getenv('GRAPH_CLIENT_SECRET') ?: ($envMap['GRAPH_CLIENT_SECRET'] ?? '');
-        $this->siteId = getenv('VITE_SHAREPOINT_SITE_ID') ?: ($envMap['VITE_SHAREPOINT_SITE_ID'] ?? '');
-        $this->listName = getenv('VITE_LIST_NAME') ?: ($envMap['VITE_LIST_NAME'] ?? 'Solicitudes - SSGG e IT');
+        $this->tenantId = getenv('GRAPH_TENANT_ID') ?: ($_ENV['GRAPH_TENANT_ID'] ?? ($_SERVER['GRAPH_TENANT_ID'] ?? ($envMap['GRAPH_TENANT_ID'] ?? '')));
+        $this->clientId = getenv('GRAPH_CLIENT_ID') ?: ($_ENV['GRAPH_CLIENT_ID'] ?? ($_SERVER['GRAPH_CLIENT_ID'] ?? ($envMap['GRAPH_CLIENT_ID'] ?? '')));
+        $this->clientSecret = getenv('GRAPH_CLIENT_SECRET') ?: ($_ENV['GRAPH_CLIENT_SECRET'] ?? ($_SERVER['GRAPH_CLIENT_SECRET'] ?? ($envMap['GRAPH_CLIENT_SECRET'] ?? '')));
+        $this->siteId = getenv('VITE_SHAREPOINT_SITE_ID') ?: ($_ENV['VITE_SHAREPOINT_SITE_ID'] ?? ($_SERVER['VITE_SHAREPOINT_SITE_ID'] ?? ($envMap['VITE_SHAREPOINT_SITE_ID'] ?? '')));
+        $this->listName = getenv('VITE_LIST_NAME') ?: ($_ENV['VITE_LIST_NAME'] ?? ($_SERVER['VITE_LIST_NAME'] ?? ($envMap['VITE_LIST_NAME'] ?? 'Solicitudes - SSGG e IT')));
     }
 
     /**
@@ -126,6 +126,7 @@ class SharePointService {
 
     /**
      * Encontrar el ID más alto existente en la lista de SharePoint (los registros más nuevos)
+     * Implementa una búsqueda exponencial y binaria tolerante a saltos y registros eliminados.
      */
     public function findMaxSharePointId(string $token, string $listId): int {
         $localMax = 0;
@@ -137,46 +138,82 @@ class SharePointService {
         $headerAuth = "Authorization: Bearer {$token}\r\nAccept: application/json\r\n";
         $opts = [
             'http' => [
-                'method'  => 'GET',
-                'header'  => $headerAuth,
-                'timeout' => 5,
+                'method'        => 'GET',
+                'header'        => $headerAuth,
+                'timeout'       => 6,
                 'ignore_errors' => true
             ]
         ];
         $context = stream_context_create($opts);
 
-        $currentMax = $probeStart;
-        for ($check = $probeStart; $check <= $probeStart + 300; $check += 10) {
-            $u = "https://graph.microsoft.com/v1.0/sites/{$this->siteId}/lists/{$listId}/items/{$check}?\$select=id";
+        $exists = function(int $id) use ($token, $listId, $context): bool {
+            if ($id < 1) return false;
+            $u = "https://graph.microsoft.com/v1.0/sites/{$this->siteId}/lists/{$listId}/items/{$id}?\$select=id";
             $res = @file_get_contents($u, false, $context);
-            if ($res !== false) {
-                $d = json_decode($res, true);
-                if (!empty($d['id'])) {
-                    $currentMax = (int)$d['id'];
+            if ($res === false) return false;
+            $d = json_decode($res, true);
+            return !empty($d['id']);
+        };
+
+        // Paso 1: Encontrar un límite superior seguro (Upper Bound)
+        $low = $probeStart;
+        $step = 50;
+        $high = $low;
+        $ceiling = $low + 100;
+
+        while (true) {
+            $next = $high + $step;
+            if ($exists($next)) {
+                $high = $next;
+                $low = $next;
+                $step = min($step * 2, 200);
+            } else {
+                // Verificar si es un salto vacío aislado o realmente llegamos al final
+                if ($exists($next + 20) || $exists($next + 50)) {
+                    $high = $next + 50;
+                    $low = $high;
                 } else {
+                    $ceiling = $next + 50;
                     break;
                 }
-            } else {
-                break;
             }
         }
 
-        for ($check = $currentMax + 1; $check <= $currentMax + 15; $check++) {
-            $u = "https://graph.microsoft.com/v1.0/sites/{$this->siteId}/lists/{$listId}/items/{$check}?\$select=id";
-            $res = @file_get_contents($u, false, $context);
-            if ($res !== false) {
-                $d = json_decode($res, true);
-                if (!empty($d['id'])) {
-                    $currentMax = (int)$d['id'];
-                } else {
-                    break;
-                }
+        // Paso 2: Búsqueda binaria entre $low y $ceiling
+        $left = $low;
+        $right = $ceiling;
+        $maxFound = $low;
+
+        while ($left <= $right) {
+            $mid = intdiv($left + $right, 2);
+            $midExists = $exists($mid) || $exists($mid + 1) || $exists($mid + 2);
+            if ($midExists) {
+                if ($exists($mid + 2)) $midMax = $mid + 2;
+                elseif ($exists($mid + 1)) $midMax = $mid + 1;
+                else $midMax = $mid;
+
+                $maxFound = max($maxFound, $midMax);
+                $left = $midMax + 1;
             } else {
-                break;
+                $right = $mid - 1;
             }
         }
 
-        return $currentMax;
+        // Paso 3: Afinar hacia adelante desde $maxFound paso a paso
+        $consecutiveMisses = 0;
+        for ($c = $maxFound + 1; $c <= $maxFound + 50; $c++) {
+            if ($exists($c)) {
+                $maxFound = $c;
+                $consecutiveMisses = 0;
+            } else {
+                $consecutiveMisses++;
+                if ($consecutiveMisses >= 10) {
+                    break;
+                }
+            }
+        }
+
+        return $maxFound;
     }
 
     /**
@@ -358,8 +395,8 @@ class SharePointService {
                 UPDATE kanban_status SET name = 'Resuelto' WHERE id = 4;
             ");
 
-            // 5. Eliminar tickets de prueba ficticios antiguos sin sharepoint_id
-            $this->db->exec("DELETE FROM tickets WHERE sharepoint_id IS NULL");
+            // 5. Los tickets locales sin sharepoint_id se conservan y pueden ser exportados
+            // (no se eliminan registros para proteger datos del usuario)
 
             // 6. Asegurar existencia de tabla ticket_satisfaction_surveys (CSAT)
             $this->db->exec("
@@ -512,22 +549,31 @@ class SharePointService {
                     if (empty($agentEmailSlug)) $agentEmailSlug = 'agente';
                     $agentEmail = "{$agentEmailSlug}@empresa.com";
 
-                    $stmtFindAgent = $this->db->prepare("SELECT id FROM users WHERE name = :name LIMIT 1");
-                    $stmtFindAgent->execute([':name' => $responsable]);
+                    $stmtFindAgent = $this->db->prepare("
+                        SELECT id FROM users 
+                        WHERE LOWER(TRIM(alias)) = LOWER(:resp_alias) 
+                           OR LOWER(TRIM(name)) = LOWER(:resp_name) 
+                        LIMIT 1
+                    ");
+                    $stmtFindAgent->execute([
+                        ':resp_alias' => $responsable,
+                        ':resp_name'  => $responsable
+                    ]);
                     $existingAgent = $stmtFindAgent->fetch();
 
                     if ($existingAgent) {
                         $agentUserCache[$responsable] = (int)$existingAgent['id'];
                     } else {
-                        // Crear usuario agente con el nombre del Responsable de SharePoint
+                        // Crear usuario agente con el alias/siglas de SharePoint en nombre y alias
                         $stmtCreateAgent = $this->db->prepare("
-                            INSERT INTO users (area_id, role_id, name, email, password_hash, is_active)
-                            VALUES (:area_id, 3, :name, :email, :pass, 1)
+                            INSERT INTO users (area_id, role_id, name, alias, email, password_hash, is_active)
+                            VALUES (:area_id, 3, :name, :alias, :email, :pass, 1)
                         ");
                         $defaultPass = '$2y$10$qV4eW4vR6p0yR8.XQ24.m0d1FqWuu1.Yy3gE7wO0a123456789012';
                         $stmtCreateAgent->execute([
                             ':area_id' => $areaId,
                             ':name'    => $responsable,
+                            ':alias'   => $responsable,
                             ':email'   => $agentEmail,
                             ':pass'    => $defaultPass
                         ]);

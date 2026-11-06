@@ -466,7 +466,32 @@ function initNewTicketForm() {
 
     form.addEventListener('submit', async (e) => {
         e.preventDefault();
+
+        const submitBtn = document.getElementById('btn-submit-create-ticket') || form.querySelector('button[type="submit"]');
+        if (submitBtn && submitBtn.disabled) return;
+
+        const originalBtnHtml = submitBtn ? submitBtn.innerHTML : 'Guardar Solicitud';
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.style.opacity = '0.75';
+            submitBtn.style.cursor = 'not-allowed';
+            submitBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="spin" style="margin-right:6px;"><line x1="12" y1="2" x2="12" y2="6"/><line x1="12" y1="18" x2="12" y2="22"/><line x1="4.93" y1="4.93" x2="7.76" y2="7.76"/><line x1="16.24" y1="16.24" x2="19.07" y2="19.07"/><line x1="2" y1="12" x2="6" y2="12"/><line x1="18" y1="12" x2="22" y2="12"/><line x1="4.93" y1="19.07" x2="7.76" y2="16.24"/><line x1="16.24" y1="7.76" x2="19.07" y2="4.93"/></svg>Guardando...';
+        }
+
+        const restoreSubmitBtn = () => {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.style.opacity = '1';
+                submitBtn.style.cursor = 'pointer';
+                submitBtn.innerHTML = originalBtnHtml;
+            }
+        };
+
         const formData = new FormData(form);
+        const syncCheckbox = document.getElementById('create-sync-sharepoint');
+        if (syncCheckbox) {
+            formData.set('sync_sharepoint', syncCheckbox.checked ? '1' : '0');
+        }
         formData.append('csrf_token', getCsrfToken());
 
         try {
@@ -480,18 +505,20 @@ function initNewTicketForm() {
 
             const result = await response.json();
             if (result.success) {
-                showToast(result.message, 'success');
+                showToast(result.message, result.warning ? 'warning' : 'success');
                 form.reset();
                 setTimeout(() => {
                     const activeContent = document.querySelector('.tab-content.active');
                     const tab = activeContent ? activeContent.id : 'tickets-tab';
                     window.location.href = `index.php?tab=${encodeURIComponent(tab)}&page=1`;
-                }, 1500);
+                }, result.warning ? 3500 : 1500);
             } else {
                 showToast(result.message, 'error');
+                restoreSubmitBtn();
             }
         } catch (err) {
             showToast('Error al procesar la subida del ticket y archivo.', 'error');
+            restoreSubmitBtn();
         }
     });
 }
@@ -675,12 +702,13 @@ function filterUsersTable() {
 
     rows.forEach(row => {
         const name = row.dataset.name || '';
+        const alias = row.dataset.alias || '';
         const email = row.dataset.email || '';
         const area = (row.dataset.area || '').toLowerCase();
         const role = row.dataset.role || '';
         const active = row.dataset.active || '';
 
-        const matchQuery = !query || name.includes(query) || email.includes(query);
+        const matchQuery = !query || name.includes(query) || alias.includes(query) || email.includes(query);
         const matchArea = !selectedArea || area.includes(selectedArea);
         const matchRole = !selectedRole || role === selectedRole;
         const matchStatus = !selectedStatus || active === selectedStatus;
@@ -717,6 +745,7 @@ function openEditUserModal(user) {
 
     const idInput = document.getElementById('edit-user-id');
     const nameInput = document.getElementById('edit-user-name');
+    const aliasInput = document.getElementById('edit-user-alias');
     const emailInput = document.getElementById('edit-user-email');
     const areaInput = document.getElementById('edit-user-area-id');
     const roleInput = document.getElementById('edit-user-role-id');
@@ -724,6 +753,7 @@ function openEditUserModal(user) {
 
     if (idInput) idInput.value = user.id;
     if (nameInput) nameInput.value = user.name || '';
+    if (aliasInput) aliasInput.value = user.alias || user.name || '';
     if (emailInput) emailInput.value = user.email || '';
     if (areaInput) areaInput.value = user.area_id || '';
     if (roleInput) roleInput.value = user.role_id || '3';
@@ -1555,10 +1585,10 @@ function initTicketRowClickSelection() {
         }
 
         // Buscar si el clic proviene de una fila de ticket
-        const row = e.target.closest('tr.ticket-row, tr[data-ticket-id]');
+        const row = e.target.closest('tr.ticket-row, tr[data-ticket-id], tr.my-ticket-row');
         if (!row) return;
 
-        const ticketId = row.dataset.ticketId;
+        const ticketId = row.dataset.ticketId || row.dataset.id;
         if (ticketId && typeof openTicketModal === 'function') {
             openTicketModal(parseInt(ticketId, 10));
         }
@@ -1612,6 +1642,14 @@ function filterTicketsGlobal(query) {
 }
 
 function filterMyRequests(query) {
+    const searchInput = document.getElementById('my-tickets-search');
+    if (searchInput && query !== undefined) {
+        searchInput.value = query;
+    }
+    if (typeof window.onMyTicketsFilterChange === 'function') {
+        window.onMyTicketsFilterChange();
+        return;
+    }
     query = (query || '').toLowerCase().trim();
     const rows = document.querySelectorAll('#my-requests-table tbody tr.ticket-row');
     let visibleCount = 0;

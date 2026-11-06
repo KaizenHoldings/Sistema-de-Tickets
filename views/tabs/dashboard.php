@@ -65,7 +65,7 @@
                             $prios = $kpis['priorities'] ?? ['urgent'=>1, 'high'=>1, 'medium'=>1, 'low'=>1];
                             $totUnres = max(1, ($kpis['unresolved_tickets'] ?? 1));
                         ?>
-                        <div class="fd-prio-bar-item">
+                        <div class="fd-prio-bar-item" style="cursor:pointer;" onclick="filterAndShowTickets('priority', 'urgent')" title="Ver tickets con prioridad Urgente">
                             <div class="fd-prio-bar-labels">
                                 <span style="color:#DC2626; display:inline-flex; align-items:center; gap:6px;"><span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#DC2626;"></span>Urgente</span>
                                 <span><?= $prios['urgent'] ?? 0 ?></span>
@@ -75,7 +75,7 @@
                             </div>
                         </div>
 
-                        <div class="fd-prio-bar-item">
+                        <div class="fd-prio-bar-item" style="cursor:pointer;" onclick="filterAndShowTickets('priority', 'high')" title="Ver tickets con prioridad Alta">
                             <div class="fd-prio-bar-labels">
                                 <span style="color:#EA580C; display:inline-flex; align-items:center; gap:6px;"><span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#EA580C;"></span>Alta</span>
                                 <span><?= $prios['high'] ?? 0 ?></span>
@@ -85,7 +85,7 @@
                             </div>
                         </div>
 
-                        <div class="fd-prio-bar-item">
+                        <div class="fd-prio-bar-item" style="cursor:pointer;" onclick="filterAndShowTickets('priority', 'medium')" title="Ver tickets con prioridad Media">
                             <div class="fd-prio-bar-labels">
                                 <span style="color:#D97706; display:inline-flex; align-items:center; gap:6px;"><span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#D97706;"></span>Media</span>
                                 <span><?= $prios['medium'] ?? 0 ?></span>
@@ -95,7 +95,7 @@
                             </div>
                         </div>
 
-                        <div class="fd-prio-bar-item">
+                        <div class="fd-prio-bar-item" style="cursor:pointer;" onclick="filterAndShowTickets('priority', 'low')" title="Ver tickets con prioridad Baja">
                             <div class="fd-prio-bar-labels">
                                 <span style="color:#059669; display:inline-flex; align-items:center; gap:6px;"><span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#059669;"></span>Baja</span>
                                 <span><?= $prios['low'] ?? 0 ?></span>
@@ -119,7 +119,7 @@
                             </div>
                             <div class="fd-sla-info">
                                 <div class="fd-sla-stat"><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#10B981; margin-right:6px;"></span>Tickets en plazo: <strong><?= max(0, ($kpis['total_tickets'] ?? 0) - ($kpis['overdue_tickets'] ?? 0)) ?></strong></div>
-                                <div class="fd-sla-stat"><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#EF4444; margin-right:6px;"></span>Excedidos: <strong style="color:#DC2626;"><?= $kpis['overdue_tickets'] ?? 0 ?></strong></div>
+                                <div class="fd-sla-stat" style="cursor:pointer;" onclick="filterAndShowTickets('overdue')" title="Ver tickets fuera de SLA"><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#EF4444; margin-right:6px;"></span>Excedidos: <strong style="color:#DC2626;"><?= $kpis['overdue_tickets'] ?? 0 ?></strong></div>
                                 <div class="fd-sla-stat"><span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:#3B82F6; margin-right:6px;"></span>Meta corporativa: <strong>95.0%</strong></div>
                             </div>
                         </div>
@@ -136,7 +136,7 @@
                         <?php else: ?>
                             <div style="display:flex; flex-direction:column; gap:0.75rem;">
                                 <?php foreach (array_slice($agentWorkload, 0, 4) as $ag): ?>
-                                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px;">
+                                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:12px; cursor:pointer; padding:2px 4px; border-radius:4px; transition:background 0.15s;" onmouseover="this.style.background='#F1F5F9'" onmouseout="this.style.background='transparent'" onclick="filterAndShowTickets('agent', '<?= htmlspecialchars($ag['agent_name'], ENT_QUOTES) ?>')" title="Ver tickets asignados a <?= htmlspecialchars($ag['agent_name']) ?>">
                                         <span style="display:flex; align-items:center; gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?= htmlspecialchars($ag['agent_name']) ?></span>
                                         <span class="ticket-count"><?= (int)$ag['assigned_tickets'] ?> activos</span>
                                     </div>

@@ -75,7 +75,7 @@
                     </div>
                 </div>
 
-                <div class="fd-user-summary">
+                <div class="fd-user-summary" onclick="switchNavTab('profile-tab')" style="cursor:pointer;" title="Ver Mi Perfil y Espacio Personal">
                     <span><strong><?= htmlspecialchars($currentUser['name']) ?></strong></span>
                     <span class="fd-user-role-badge"><?= htmlspecialchars($displayRole) ?></span>
                 </div>

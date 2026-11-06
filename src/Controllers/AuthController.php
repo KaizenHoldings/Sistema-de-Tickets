@@ -27,7 +27,7 @@ class AuthController {
             }
 
             $stmt = $this->db->prepare("
-                SELECT u.id, u.name, u.email, u.password_hash, u.is_active, u.area_id,
+                SELECT u.id, u.name, u.alias, u.email, u.password_hash, u.is_active, u.area_id,
                        r.id as role_id, r.name as role_name,
                        a.name as area_name
                 FROM users u
@@ -59,6 +59,7 @@ class AuthController {
             $_SESSION['user'] = [
                 'id' => (int)$user['id'],
                 'name' => htmlspecialchars($user['name'], ENT_QUOTES, 'UTF-8'),
+                'alias' => htmlspecialchars($user['alias'] ?? $user['name'], ENT_QUOTES, 'UTF-8'),
                 'email' => strtolower($user['email']),
                 'role_id' => (int)$user['role_id'],
                 'role_name' => $user['role_name'],

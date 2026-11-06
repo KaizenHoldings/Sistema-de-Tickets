@@ -1,0 +1,6 @@
+Los tickets creados en el sistema no se están sincronizando con sharepoint
+ 
+Status en vista pendiente y filtros al inicio
+
+Quitar páginas de pendientes
+ 

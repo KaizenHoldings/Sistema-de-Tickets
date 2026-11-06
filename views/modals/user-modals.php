@@ -10,12 +10,18 @@
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.85rem;">
                 <div class="form-group" style="margin-bottom:0;">
                     <label style="font-size:12px; font-weight:600; color:#1E293B;">Nombre Completo: <span style="color:#DC2626;">*</span></label>
-                    <input type="text" name="name" class="form-control" placeholder="Ej: Valentina Morales" required>
+                    <input type="text" name="name" class="form-control" placeholder="Ej: Carlos Mendoza" required>
                 </div>
                 <div class="form-group" style="margin-bottom:0;">
-                    <label style="font-size:12px; font-weight:600; color:#1E293B;">Correo Electrónico: <span style="color:#DC2626;">*</span></label>
-                    <input type="email" name="email" class="form-control" placeholder="valentina@empresa.com" required>
+                    <label style="font-size:12px; font-weight:600; color:#1E293B;">Alias / Siglas SharePoint:</label>
+                    <input type="text" name="alias" class="form-control" placeholder="Ej: CM (Siglas en SharePoint)">
+                    <small style="color:#64748B; font-size:11px;">Siglas en SharePoint para vincular tickets asignados.</small>
                 </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom:0;">
+                <label style="font-size:12px; font-weight:600; color:#1E293B;">Correo Electrónico: <span style="color:#DC2626;">*</span></label>
+                <input type="email" name="email" class="form-control" placeholder="carlos.mendoza@empresa.com" required>
             </div>
 
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.85rem;">
@@ -71,9 +77,15 @@
                     <input type="text" name="name" id="edit-user-name" class="form-control" required>
                 </div>
                 <div class="form-group" style="margin-bottom:0;">
-                    <label style="font-size:12px; font-weight:600; color:#1E293B;">Correo Electrónico: <span style="color:#DC2626;">*</span></label>
-                    <input type="email" name="email" id="edit-user-email" class="form-control" required>
+                    <label style="font-size:12px; font-weight:600; color:#1E293B;">Alias / Siglas SharePoint: <span style="color:#DC2626;">*</span></label>
+                    <input type="text" name="alias" id="edit-user-alias" class="form-control" placeholder="Ej: CM, JT, JD" required>
+                    <small style="color:#64748B; font-size:11px;">Siglas en SharePoint que identifican a este responsable.</small>
                 </div>
+            </div>
+
+            <div class="form-group" style="margin-bottom:0;">
+                <label style="font-size:12px; font-weight:600; color:#1E293B;">Correo Electrónico: <span style="color:#DC2626;">*</span></label>
+                <input type="email" name="email" id="edit-user-email" class="form-control" required>
             </div>
 
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.85rem;">

@@ -350,6 +350,24 @@ try {
         exit;
     }
 
+    if ($action === 'update_own_password') {
+        $currentUser = AuthMiddleware::requireAuth();
+        $controller = new UserController();
+        $currentPass = (string)($input['current_password'] ?? '');
+        $newPass = (string)($input['new_password'] ?? '');
+        $response = $controller->updateOwnPassword((int)$currentUser['id'], $currentPass, $newPass);
+        echo json_encode($response);
+        exit;
+    }
+
+    if ($action === 'update_own_profile') {
+        $currentUser = AuthMiddleware::requireAuth();
+        $controller = new UserController();
+        $response = $controller->updateOwnProfile((int)$currentUser['id'], $input, $currentUser);
+        echo json_encode($response);
+        exit;
+    }
+
     if ($action === 'get_all_users') {
         AuthMiddleware::requireRoles(['admin']);
         $controller = new UserController();

@@ -139,6 +139,7 @@
                                         <tr class="user-row" 
                                             data-user-id="<?= $u['id'] ?>"
                                             data-name="<?= htmlspecialchars(strtolower($u['name'])) ?>"
+                                            data-alias="<?= htmlspecialchars(strtolower($u['alias'] ?? '')) ?>"
                                             data-email="<?= htmlspecialchars(strtolower($u['email'])) ?>"
                                             data-area="<?= htmlspecialchars($u['area_name'] ?? 'Sin Área') ?>"
                                             data-role="<?= htmlspecialchars($u['role_name']) ?>"
@@ -149,8 +150,13 @@
                                                         <?= strtoupper(substr($u['name'], 0, 2)) ?>
                                                     </div>
                                                     <div>
-                                                        <div class="fd-user-name-line">
+                                                        <div class="fd-user-name-line" style="display:flex; align-items:center; gap:0.4rem; flex-wrap:wrap;">
                                                             <span class="fd-user-name-text"><?= htmlspecialchars($u['name']) ?></span>
+                                                            <?php if (!empty($u['alias'])): ?>
+                                                                <span class="badge" style="background:#EFF6FF; color:#1D4ED8; font-size:10.5px; font-weight:700; padding:1px 6px; border:1px solid #DBEAFE;" title="Siglas / Alias SharePoint para asignación de tickets">
+                                                                    Siglas: <?= htmlspecialchars($u['alias']) ?>
+                                                                </span>
+                                                            <?php endif; ?>
                                                             <?php if ((int)$u['id'] === (int)$currentUser['id']): ?>
                                                                 <span class="fd-user-you-badge">Tú</span>
                                                             <?php endif; ?>
@@ -190,6 +196,7 @@
                                                     <button type="button" class="fd-user-action-btn btn-edit" title="Editar datos del usuario" onclick="openEditUserModal(<?= htmlspecialchars(json_encode([
                                                         'id' => (int)$u['id'],
                                                         'name' => $u['name'],
+                                                        'alias' => $u['alias'] ?? $u['name'],
                                                         'email' => $u['email'],
                                                         'role_id' => (int)$u['role_id'],
                                                         'area_id' => $u['area_id'] ? (int)$u['area_id'] : '',

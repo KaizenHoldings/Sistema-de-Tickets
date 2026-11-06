@@ -1,7 +1,10 @@
 <?php
 namespace Controllers;
 
+require_once __DIR__ . '/../Services/SharePointService.php';
+
 use Config\Database;
+use Services\SharePointService;
 use PDO;
 use Exception;
 
@@ -132,7 +135,14 @@ class TicketController {
             }
 
             $year = date('Y');
-            $syncSharePoint = !empty($data['sync_sharepoint']) && ($data['sync_sharepoint'] === '1' || $data['sync_sharepoint'] === 'true' || $data['sync_sharepoint'] === true);
+            // Por defecto SIEMPRE guardar y sincronizar con SharePoint a menos que se desactive explícitamente (0 o 'false')
+            $syncSharePoint = true;
+            if (isset($data['sync_sharepoint'])) {
+                $v = $data['sync_sharepoint'];
+                if ($v === '0' || $v === 0 || $v === false || $v === 'false') {
+                    $syncSharePoint = false;
+                }
+            }
             $isDryRun = !empty($data['dry_run']) && ($data['dry_run'] === '1' || $data['dry_run'] === 'true' || $data['dry_run'] === true);
 
             $spId = null;
@@ -207,9 +217,11 @@ class TicketController {
             ]);
 
             $ticketId = $this->db->lastInsertId();
+            $hasSpWarning = ($syncSharePoint && empty($spId));
 
             return [
                 'success'       => true,
+                'warning'       => $hasSpWarning,
                 'message'       => "Ticket {$code} generado exitosamente{$spNotice}" . ($attachmentPath ? " con archivo adjunto." : "."),
                 'ticket_id'     => $ticketId,
                 'sharepoint_id' => $spId,
@@ -551,12 +563,13 @@ class TicketController {
     }
 
     /**
-     * Obtener los tickets creados/solicitados por el usuario autenticado (Mis Solicitudes)
+     * Obtener los tickets creados/solicitados por el usuario autenticado (Mis Solicitudes Creadas)
      */
     public function getMyRequestedTickets(int $userId): array {
         try {
             $stmt = $this->db->prepare("
                 SELECT t.id, t.code, t.title, t.description, t.priority, t.status_id, t.area_id, t.created_at,
+                       t.company_name, t.responsable, t.sp_status, t.due_date, t.sharepoint_id,
                        ks.name as status_name, ks.slug as status_slug,
                        a.name as area_name,
                        u_ag.name as agent_name,
@@ -570,7 +583,55 @@ class TicketController {
                 ORDER BY t.created_at DESC
             ");
             $stmt->execute([':user_id' => $userId]);
-            return ['success' => true, 'data' => $stmt->fetchAll()];
+            return ['success' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)];
+        } catch (Exception $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Obtener los tickets asignados al usuario autenticado (Mis Tickets Asignados como Agente / Responsable)
+     * Realiza el match por ID de agente asignado o por el Alias / Siglas / Nombre de SharePoint
+     */
+    public function getMyAssignedTickets(array $currentUser): array {
+        try {
+            $userId = (int)($currentUser['id'] ?? 0);
+            $userName = trim($currentUser['name'] ?? '');
+            $userAlias = trim($currentUser['alias'] ?? '');
+
+            if (empty($userAlias)) {
+                $stmtA = $this->db->prepare("SELECT alias, name FROM users WHERE id = :uid");
+                $stmtA->execute([':uid' => $userId]);
+                $uRow = $stmtA->fetch(PDO::FETCH_ASSOC);
+                $userAlias = trim($uRow['alias'] ?? $userName);
+                if (!empty($uRow['name'])) $userName = $uRow['name'];
+            }
+
+            $stmt = $this->db->prepare("
+                SELECT t.id, t.code, t.title, t.description, t.priority, t.status_id, t.area_id, t.created_at,
+                       t.company_name, t.responsable, t.sp_status, t.due_date, t.sharepoint_id,
+                       ks.name as status_name, ks.slug as status_slug,
+                       a.name as area_name,
+                       u_req.name as requester_name, u_req.email as requester_email,
+                       u_ag.name as agent_name
+                FROM tickets t
+                INNER JOIN kanban_status ks ON t.status_id = ks.id
+                INNER JOIN areas a ON t.area_id = a.id
+                LEFT JOIN users u_req ON t.requester_id = u_req.id
+                LEFT JOIN users u_ag ON t.assigned_agent_id = u_ag.id
+                WHERE t.assigned_agent_id = :uid
+                   OR (t.responsable IS NOT NULL AND TRIM(t.responsable) != '' AND (
+                       LOWER(TRIM(t.responsable)) = LOWER(:uname)
+                       OR LOWER(TRIM(t.responsable)) = LOWER(:ualias)
+                   ))
+                ORDER BY t.created_at DESC
+            ");
+            $stmt->execute([
+                ':uid'    => $userId,
+                ':uname'  => $userName,
+                ':ualias' => $userAlias
+            ]);
+            return ['success' => true, 'data' => $stmt->fetchAll(PDO::FETCH_ASSOC)];
         } catch (Exception $e) {
             return ['success' => false, 'message' => $e->getMessage()];
         }

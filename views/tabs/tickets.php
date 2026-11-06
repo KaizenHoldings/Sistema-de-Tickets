@@ -296,9 +296,9 @@
                                         data-requester-email="<?= htmlspecialchars(strtolower($t['requester_email'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" 
                                         data-date="<?= htmlspecialchars(substr($t['created_at'] ?? '', 0, 10)) ?>"
                                         data-due-date="<?= htmlspecialchars($t['due_date'] ?? '') ?>"
-                                        data-resolved-at="<?= htmlspecialchars($t['resolved_at'] ?? '') ?>"
                                         data-created-at="<?= htmlspecialchars($t['created_at'] ?? '') ?>"
-                                        data-timestamp="<?= strtotime($t['created_at'] ?? '2000-01-01 00:00:00') ?>">
+                                        data-timestamp="<?= strtotime($t['created_at'] ?? '2000-01-01 00:00:00') ?>"
+                                        data-is-sla-breached="<?= (int)($t['is_sla_breached'] ?? 0) ?>">
                                         <!-- 1. Solicitud (Código + Asunto) -->
                                         <td>
                                             <span class="fd-ticket-code"><?= htmlspecialchars($t['code']) ?></span>
@@ -441,10 +441,14 @@
                                                  data-title="<?= htmlspecialchars(strtolower($ticket['title'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" 
                                                  data-priority="<?= htmlspecialchars(strtolower($ticket['priority'] ?? 'medium')) ?>" 
                                                  data-status-id="<?= (int)$ticket['status_id'] ?>" 
+                                                 data-status-name="<?= htmlspecialchars(strtolower($ticket['status_name'] ?? $ticket['sp_status'] ?? '')) ?>" 
                                                  data-area-id="<?= (int)($ticket['area_id'] ?? 0) ?>" 
                                                  data-agent-id="<?= (int)($ticket['assigned_agent_id'] ?? 0) ?>" 
+                                                 data-responsable="<?= htmlspecialchars(strtolower($ticket['responsable'] ?? $ticket['agent_name'] ?? 'sin asignar')) ?>" 
                                                  data-requester-name="<?= htmlspecialchars(strtolower($ticket['requester_name'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" 
-                                                 data-date="<?= htmlspecialchars(substr($ticket['created_at'] ?? '', 0, 10)) ?>">
+                                                 data-date="<?= htmlspecialchars(substr($ticket['created_at'] ?? '', 0, 10)) ?>"
+                                                 data-due-date="<?= htmlspecialchars($ticket['due_date'] ?? '') ?>"
+                                                 data-is-sla-breached="<?= (int)($ticket['is_sla_breached'] ?? 0) ?>">
                                                 <div class="ticket-code"><?= htmlspecialchars($ticket['code']) ?></div>
                                                 <div class="ticket-title"><?= htmlspecialchars($ticket['title']) ?></div>
 

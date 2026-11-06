@@ -43,8 +43,9 @@
                     <span>Mis Solicitudes</span>
                 </button>
 
-                <!-- 2.7. TICKETS PENDIENTES & HOJA DE TAREAS OPERATIVA -->
-                <button class="fd-nav-item nav-tab <?= ($activeTab === 'pending-tab') ? 'active' : '' ?>" data-target="pending-tab" data-tooltip="Tickets Pendientes y Tareas" style="position: relative;">
+                <!-- 2.7. TICKETS PENDIENTES & HOJA DE TAREAS OPERATIVA (OCULTO) -->
+                <!--
+                <button class="fd-nav-item nav-tab <?= ($activeTab === 'pending-tab') ? 'active' : '' ?>" data-target="pending-tab" data-tooltip="Tickets Pendientes y Tareas" style="position: relative; display: none;">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="10"/>
                         <polyline points="12 6 12 12 16 14"/>
@@ -54,6 +55,7 @@
                         <?= $pendingCountTotal ?>
                     </span>
                 </button>
+                -->
 
                 <!-- 3. BANDEJA DE ASIGNACIÓN / INBOX (ACCESO PARA LOS 3 ROLES) -->
                 <button class="fd-nav-item nav-tab <?= ($activeTab === 'inbox-tab') ? 'active' : '' ?>" data-target="inbox-tab" data-tooltip="Bandeja de Entrada / Inbox" style="position: relative;">
@@ -77,7 +79,16 @@
                     <span>Informes</span>
                 </button>
 
-                <!-- 5. SUPERADMIN (SOLO ADMIN) -->
+                <!-- 5. PERFIL Y ESPACIO PERSONAL -->
+                <button class="fd-nav-item nav-tab <?= ($activeTab === 'profile-tab') ? 'active' : '' ?>" data-target="profile-tab" data-tooltip="Mi Perfil y Espacio Personal">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                        <circle cx="12" cy="7" r="4"/>
+                    </svg>
+                    <span>Perfil</span>
+                </button>
+
+                <!-- 6. SUPERADMIN (SOLO ADMIN) -->
                 <?php if ($currentUser['role_name'] === 'admin'): ?>
                     <button class="fd-nav-item nav-tab <?= ($activeTab === 'admin-tab') ? 'active' : '' ?>" data-target="admin-tab" data-tooltip="Administración">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
@@ -91,7 +102,7 @@
         </div>
 
         <div class="fd-sidebar-bottom">
-            <div class="fd-avatar-circle" title="<?= htmlspecialchars($currentUser['name']) ?> (<?= htmlspecialchars($role) ?>)">
+            <div class="fd-avatar-circle" onclick="switchNavTab('profile-tab')" style="cursor:pointer;" title="Ver Mi Perfil y Espacio Personal (<?= htmlspecialchars($currentUser['name']) ?>)">
                 <?= htmlspecialchars($userInitials) ?>
                 <span class="fd-avatar-status" title="En línea"></span>
             </div>

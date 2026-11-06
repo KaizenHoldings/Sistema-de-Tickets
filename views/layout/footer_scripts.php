@@ -320,6 +320,15 @@
     let isInternalNoteMode = false;
 
     function openCreateTicketModal() {
+        const chk = document.getElementById('create-sync-sharepoint');
+        if (chk) chk.checked = true;
+        const submitBtn = document.getElementById('btn-submit-create-ticket');
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.style.opacity = '1';
+            submitBtn.style.cursor = 'pointer';
+            submitBtn.innerHTML = 'Guardar Solicitud';
+        }
         document.getElementById('create-ticket-modal').style.display = 'flex';
     }
 
@@ -531,9 +540,12 @@
             }
         } else {
             listDiv.style.display = 'none';
-            kanbanDiv.style.display = 'block';
+            kanbanDiv.style.display = 'flex';
             btnKanban.classList.add('active');
             btnList.classList.remove('active');
+            if (typeof applyAllFilters === 'function') {
+                applyAllFilters(true);
+            }
         }
     }
 
@@ -613,6 +625,10 @@
 
         if (tabId === 'inbox-tab' && typeof loadUnassignedTickets === 'function') {
             loadUnassignedTickets();
+        }
+
+        if (tabId === 'my-requests-tab' && typeof window.renderCurrentMyTicketsPagination === 'function') {
+            window.renderCurrentMyTicketsPagination();
         }
 
         if (updateUrl) {
@@ -733,12 +749,20 @@
             if (statusInput) statusInput.value = '';
             if (respInput) respInput.value = 'Sin Asignar';
         } else if (tabKey === 'critical') {
-            if (statusInput) statusInput.value = 'Pendiente';
+            if (statusInput) statusInput.value = '';
             if (respInput) respInput.value = '';
         } else if (tabKey === 'all') {
             if (statusInput) statusInput.value = '';
             if (respInput) respInput.value = '';
         }
+
+        // Mostrar u ocultar botones de limpiar
+        [statusInput, respInput].forEach(inp => {
+            if (inp) {
+                const clearBtn = inp.parentElement ? inp.parentElement.querySelector('.fd-input-clear-btn') : null;
+                if (clearBtn) clearBtn.style.display = inp.value.trim() ? 'block' : 'none';
+            }
+        });
 
         applyAllFilters();
     }
@@ -787,6 +811,8 @@
         const areaVal = (document.getElementById('filter-area-input')?.value || document.getElementById('filter-department-input')?.value || '').toLowerCase().trim();
         const responsableVal = (document.getElementById('filter-responsable-input')?.value || document.getElementById('filter-agent-input')?.value || '').toLowerCase().trim();
         const priorityVal = (document.getElementById('filter-priority-input')?.value || '').toLowerCase().trim();
+        const quickTab = currentTicketQuickTab || 'all';
+        const todayStr = new Date().toISOString().slice(0, 10);
 
         // 1. Filtrar filas de la tabla
         const rows = document.querySelectorAll('#all-tickets-tbody tr.ticket-row');
@@ -801,13 +827,32 @@
             const rowResp = r.dataset.responsable || r.dataset.agentName || '';
             const rowObs = r.dataset.observations || '';
             const rowStatus = r.dataset.spStatus || r.dataset.statusName || '';
+            const rowStatusId = parseInt(r.dataset.statusId || '1');
             const rowPriority = r.dataset.priority || '';
             const rowDate = r.dataset.date || '';
+            const rowDueDate = r.dataset.dueDate || '';
+            const isBreached = r.dataset.isSlaBreached === '1';
 
             let match = true;
 
+            // Filtro por QuickTab activa
+            if (quickTab === 'active') {
+                if (rowStatus.includes('procesado') || rowStatus.includes('resuelto') || rowStatusId === 4) match = false;
+            } else if (quickTab === 'critical') {
+                if (rowPriority !== 'urgent' && rowPriority !== 'high') match = false;
+            } else if (quickTab === 'overdue') {
+                if (!isBreached && !(rowDueDate && rowDueDate < todayStr && rowStatusId !== 4)) match = false;
+            } else if (quickTab === 'due_today') {
+                const isUrgent = (rowPriority === 'urgent');
+                if (!isUrgent && rowDate !== todayStr) match = false;
+                if (rowStatusId === 4) match = false;
+            } else if (quickTab.startsWith('prio_')) {
+                const targetPrio = quickTab.replace('prio_', '');
+                if (rowPriority !== targetPrio) match = false;
+            }
+
             // Filtro 1: Buscador Global (Código, Asunto u Observaciones)
-            if (query) {
+            if (match && query) {
                 const matchCode = rowCode.includes(query);
                 const matchTitle = rowTitle.includes(query);
                 const matchObs = rowObs.includes(query);
@@ -831,7 +876,15 @@
             // Filtro 4: Estatus SharePoint
             if (match && statusVal && statusVal !== 'todos los estatus' && statusVal !== 'todos los estados') {
                 if (statusVal === 'activos' || statusVal === 'activo') {
-                    if (rowStatus.includes('procesado') || rowStatus.includes('resuelto')) match = false;
+                    if (rowStatus.includes('procesado') || rowStatus.includes('resuelto') || rowStatusId === 4) match = false;
+                } else if (statusVal === 'en proceso' || statusVal === 'en progreso' || statusVal === 'en curso' || statusVal === 'in_progress') {
+                    if (!rowStatus.includes('en proceso') && !rowStatus.includes('en progreso') && rowStatusId !== 2) match = false;
+                } else if (statusVal === 'stand by' || statusVal === 'en espera' || statusVal === 'espera') {
+                    if (!rowStatus.includes('stand by') && !rowStatus.includes('espera') && rowStatusId !== 3) match = false;
+                } else if (statusVal === 'pendiente' || statusVal === 'por asignar') {
+                    if (!rowStatus.includes('pendiente') && !rowStatus.includes('por asignar') && rowStatusId !== 1) match = false;
+                } else if (statusVal === 'procesado' || statusVal === 'resuelto' || statusVal === 'cerrado') {
+                    if (!rowStatus.includes('procesado') && !rowStatus.includes('resuelto') && rowStatusId !== 4) match = false;
                 } else {
                     const matchStatus = rowStatus.includes(statusVal);
                     if (!matchStatus) match = false;
@@ -883,7 +936,7 @@
             return idB - idA;
         });
 
-        // Reordenar en el DOM para garantizar que la presentación visual respete rigurosamente el orden más nuevo -> más antiguo
+        // Reordenar en el DOM
         const tbody = document.getElementById('all-tickets-tbody');
         if (tbody) {
             matchedRows.forEach(row => tbody.appendChild(row));
@@ -936,7 +989,6 @@
 
             if (pagPagesContainer) {
                 pagPagesContainer.innerHTML = '';
-                // Mostrar botones de páginas inteligentes (máximo 5 botones)
                 const startP = Math.max(1, currentTicketPage - 2);
                 const endP = Math.min(totalPages, startP + 4);
                 for (let p = startP; p <= endP; p++) {
@@ -954,6 +1006,8 @@
                             tableCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
                         }
                     };
+                    pBtn.textContent = p;
+                    pagPagesContainer.appendChild(pBtn);
                 }
             }
         } else {
@@ -982,21 +1036,50 @@
             const cardTitle = card.dataset.title || '';
             const cardPriority = card.dataset.priority || '';
             const cardStatusId = parseInt(card.dataset.statusId || '0');
+            const cardStatusName = card.dataset.statusName || '';
             const cardAreaId = card.dataset.areaId || '';
+            const cardAreaName = card.dataset.areaName || '';
             const cardAgentId = parseInt(card.dataset.agentId || '0');
+            const cardResp = card.dataset.responsable || '';
             const cardReqName = card.dataset.requesterName || '';
             const cardDate = card.dataset.date || '';
+            const cardDueDate = card.dataset.dueDate || '';
+            const isBreached = card.dataset.isSlaBreached === '1';
 
             let match = true;
 
-            if (query && !cardCode.includes(query) && !cardTitle.includes(query)) match = false;
+            // Filtro por QuickTab activa
+            if (quickTab === 'active') {
+                if (cardStatusId === 4 || cardStatusName.includes('procesado') || cardStatusName.includes('resuelto')) match = false;
+            } else if (quickTab === 'critical') {
+                if (cardPriority !== 'urgent' && cardPriority !== 'high') match = false;
+            } else if (quickTab === 'overdue') {
+                if (!isBreached && !(cardDueDate && cardDueDate < todayStr && cardStatusId !== 4)) match = false;
+            } else if (quickTab === 'due_today') {
+                const isUrgent = (cardPriority === 'urgent');
+                if (!isUrgent && cardDate !== todayStr) match = false;
+                if (cardStatusId === 4) match = false;
+            } else if (quickTab.startsWith('prio_')) {
+                const targetPrio = quickTab.replace('prio_', '');
+                if (cardPriority !== targetPrio) match = false;
+            }
+
+            if (match && query && !cardCode.includes(query) && !cardTitle.includes(query)) match = false;
             if (match && company && !cardReqName.includes(company)) match = false;
             if (match && dateFrom && cardDate && cardDate < dateFrom) match = false;
             if (match && dateTo && cardDate && cardDate > dateTo) match = false;
 
-            if (match && statusVal && statusVal !== 'todos los estados') {
+            if (match && statusVal && statusVal !== 'todos los estados' && statusVal !== 'todos los estatus') {
                 if (statusVal === 'activos' || statusVal === 'activo') {
-                    if (cardStatusId !== 1 && cardStatusId !== 2) match = false;
+                    if (cardStatusId === 4) match = false;
+                } else if (statusVal === 'en proceso' || statusVal === 'en progreso' || statusVal === 'in_progress') {
+                    if (cardStatusId !== 2 && !cardStatusName.includes('en proceso') && !cardStatusName.includes('en progreso')) match = false;
+                } else if (statusVal === 'stand by' || statusVal === 'en espera' || statusVal === 'espera') {
+                    if (cardStatusId !== 3 && !cardStatusName.includes('stand by') && !cardStatusName.includes('espera')) match = false;
+                } else if (statusVal === 'pendiente' || statusVal === 'por asignar') {
+                    if (cardStatusId !== 1 && !cardStatusName.includes('pendiente') && !cardStatusName.includes('por asignar')) match = false;
+                } else if (statusVal === 'procesado' || statusVal === 'resuelto') {
+                    if (cardStatusId !== 4 && !cardStatusName.includes('procesado') && !cardStatusName.includes('resuelto')) match = false;
                 } else if (!card.textContent.toLowerCase().includes(statusVal)) {
                     match = false;
                 }
@@ -1012,14 +1095,15 @@
             }
 
             if (match && areaVal && areaVal !== 'todas las áreas' && areaVal !== 'todas las areas' && areaVal !== 'todas') {
-                if (!card.textContent.toLowerCase().includes(areaVal)) match = false;
+                if (!cardAreaName.includes(areaVal) && !card.textContent.toLowerCase().includes(areaVal)) match = false;
             }
 
             if (match && responsableVal && responsableVal !== 'todos los responsables' && responsableVal !== 'todos los agentes') {
                 if (responsableVal === 'sin asignar' || responsableVal === 'unassigned') {
-                    if (cardAgentId !== 0) match = false;
-                } else if (!card.textContent.toLowerCase().includes(responsableVal)) {
-                    match = false;
+                    if (cardAgentId !== 0 && cardResp && cardResp !== 'sin asignar' && cardResp !== '') match = false;
+                } else {
+                    const matchResp = cardResp.includes(responsableVal) || card.textContent.toLowerCase().includes(responsableVal);
+                    if (!matchResp) match = false;
                 }
             }
 
@@ -1047,60 +1131,110 @@
         currentTicketPage += delta;
         applyAllFilters(true);
         updateUrlState('tickets-tab', currentTicketPage);
-        // Desplazar suavemente hacia la tabla
         const tableCard = document.getElementById('tickets-subview-list');
         if (tableCard) {
             tableCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
     }
 
-    // Compatibilidad para tarjetas de métricas del Dashboard
-    function filterAndShowTickets(filterType) {
+    // Compatibilidad para tarjetas de métricas del Dashboard (Inicio)
+    function filterAndShowTickets(filterType, filterArg = null) {
         switchNavTab('tickets-tab');
         switchTicketsView('list');
 
+        // Limpiar inputs previos para no arrastrar filtros cruzados
+        const searchInput = document.getElementById('filter-global-search');
+        const compInput = document.getElementById('filter-company-input') || document.getElementById('filter-requester-input');
+        const fromInput = document.getElementById('filter-date-from');
+        const toInput = document.getElementById('filter-date-to');
         const statusInput = document.getElementById('filter-status-input');
+        const areaInput = document.getElementById('filter-area-input') || document.getElementById('filter-department-input');
+        const respInput = document.getElementById('filter-responsable-input') || document.getElementById('filter-agent-input');
         const prioInput = document.getElementById('filter-priority-input');
-        const agentInput = document.getElementById('filter-agent-input');
+
+        if (searchInput) searchInput.value = '';
+        if (compInput) compInput.value = '';
+        if (fromInput) fromInput.value = '';
+        if (toInput) toInput.value = '';
+        if (statusInput) statusInput.value = '';
+        if (areaInput) areaInput.value = '';
+        if (respInput) respInput.value = '';
+        if (prioInput) prioInput.value = '';
+
+        document.querySelectorAll('.fd-input-clear-btn').forEach(btn => btn.style.display = 'none');
+        document.querySelectorAll('.fd-date-quick-btn').forEach(btn => btn.classList.remove('active'));
+
+        currentTicketPage = 1;
 
         if (filterType === 'all') {
             applyQuickTab('all');
         } else if (filterType === 'unresolved') {
             applyQuickTab('active');
         } else if (filterType === 'open') {
-            if (statusInput) statusInput.value = 'En Progreso';
+            currentTicketQuickTab = 'open';
+            if (statusInput) {
+                statusInput.value = 'En proceso';
+                const clearBtn = statusInput.parentElement ? statusInput.parentElement.querySelector('.fd-input-clear-btn') : null;
+                if (clearBtn) clearBtn.style.display = 'block';
+            }
+            document.querySelectorAll('#fd-quick-tabs-bar .fd-quick-tab').forEach(b => b.classList.remove('active'));
             applyAllFilters();
         } else if (filterType === 'waiting') {
-            if (statusInput) statusInput.value = 'Pendiente';
+            currentTicketQuickTab = 'waiting';
+            if (statusInput) {
+                statusInput.value = 'Stand By';
+                const clearBtn = statusInput.parentElement ? statusInput.parentElement.querySelector('.fd-input-clear-btn') : null;
+                if (clearBtn) clearBtn.style.display = 'block';
+            }
+            document.querySelectorAll('#fd-quick-tabs-bar .fd-quick-tab').forEach(b => b.classList.remove('active'));
             applyAllFilters();
         } else if (filterType === 'unassigned') {
             applyQuickTab('unassigned');
-        } else if (filterType === 'overdue' || filterType === 'due_today') {
-            applyQuickTab('critical');
+        } else if (filterType === 'overdue') {
+            currentTicketQuickTab = 'overdue';
+            document.querySelectorAll('#fd-quick-tabs-bar .fd-quick-tab').forEach(b => b.classList.remove('active'));
+            applyAllFilters();
+        } else if (filterType === 'due_today') {
+            currentTicketQuickTab = 'due_today';
+            document.querySelectorAll('#fd-quick-tabs-bar .fd-quick-tab').forEach(b => b.classList.remove('active'));
+            applyAllFilters();
+        } else if (filterType === 'priority' || filterType.startsWith('prio_')) {
+            const prio = filterArg || filterType.replace('prio_', '');
+            currentTicketQuickTab = 'prio_' + prio;
+            document.querySelectorAll('#fd-quick-tabs-bar .fd-quick-tab').forEach(b => b.classList.remove('active'));
+            applyAllFilters();
+        } else if (filterType === 'agent') {
+            currentTicketQuickTab = 'agent';
+            if (respInput && filterArg) {
+                respInput.value = filterArg;
+                const clearBtn = respInput.parentElement ? respInput.parentElement.querySelector('.fd-input-clear-btn') : null;
+                if (clearBtn) clearBtn.style.display = 'block';
+            }
+            document.querySelectorAll('#fd-quick-tabs-bar .fd-quick-tab').forEach(b => b.classList.remove('active'));
+            applyAllFilters();
         }
     }
-
-    // Inicializar filtros al cargar el DOM respetando pestaña y página activa
-    document.addEventListener('DOMContentLoaded', () => {
-        const params = new URLSearchParams(window.location.search);
-        let tabParam = params.get('tab');
-        if (!tabParam) {
-            try {
-                tabParam = localStorage.getItem('active_tab');
-            } catch(e) {}
-        }
-        if (tabParam && tabParam !== 'dashboard-tab') {
-            switchNavTab(tabParam, false);
-        }
-        applyAllFilters(true);
-    });
+    window.filterAndShowTickets = filterAndShowTickets;
 
     function filterAreaChange(areaId) {
         const activeContent = document.querySelector('.tab-content.active');
         const activeTab = activeContent ? activeContent.id : 'dashboard-tab';
         const page = (activeTab === 'tickets-tab') ? (currentTicketPage || 1) : 1;
-        window.location.href = 'index.php?area_id=' + encodeURIComponent(areaId) + '&tab=' + encodeURIComponent(activeTab) + '&page=' + encodeURIComponent(page);
+        const url = new URL(window.location.href);
+        if (parseInt(areaId) > 0) {
+            url.searchParams.set('area_id', areaId);
+        } else {
+            url.searchParams.delete('area_id');
+        }
+        url.searchParams.set('tab', activeTab);
+        if (activeTab === 'tickets-tab' && page > 1) {
+            url.searchParams.set('page', page);
+        } else {
+            url.searchParams.delete('page');
+        }
+        window.location.href = url.toString();
     }
+    window.filterAreaChange = filterAreaChange;
 
     function toggleSyncMenu(event) {
         event.stopPropagation();
@@ -1218,6 +1352,22 @@
             }
         }
     }
+
+    // Sincronización automática periódica en segundo plano cada 3 minutos
+    setInterval(async () => {
+        try {
+            const activeTab = document.querySelector('.tab-content.active')?.id;
+            if (activeTab === 'tickets-tab' || activeTab === 'dashboard-tab' || activeTab === 'my-requests-tab') {
+                const res = await fetch('api.php?action=sync_sharepoint&limit=25&range=recent');
+                const data = await res.json();
+                if (data.success && data.created > 0) {
+                    if (typeof showToast === 'function') {
+                        showToast(`Sincronizados ${data.created} tickets nuevos desde SharePoint.`, 'info');
+                    }
+                }
+            }
+        } catch (e) {}
+    }, 180000);
 
     async function logout() {
         await fetch('api.php?action=logout');

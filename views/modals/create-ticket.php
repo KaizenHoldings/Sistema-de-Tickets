@@ -97,7 +97,7 @@
             <!-- 10. OPCIÓN PARA CREAR/SINCRONIZAR EN SHAREPOINT -->
             <div class="form-group" style="background:#F0F9FF; border:1px solid #BAE6FD; padding:0.75rem 0.85rem; border-radius:6px; margin-top:0.5rem;">
                 <label style="display:flex; align-items:flex-start; gap:0.6rem; cursor:pointer; margin-bottom:0;">
-                    <input type="checkbox" name="sync_sharepoint" id="create-sync-sharepoint" value="1" style="width:17px; height:17px; margin-top:2px; accent-color:#0284C7;">
+                    <input type="checkbox" name="sync_sharepoint" id="create-sync-sharepoint" value="1" checked style="width:17px; height:17px; margin-top:2px; accent-color:#0284C7;">
                     <div>
                         <span style="font-weight:600; color:#0369A1; font-size:13px; display:flex; align-items:center; gap:5px;">
                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0284C7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="12 14 16 10 12 6"/><line x1="16" y1="10" x2="6" y2="10"/></svg>
@@ -112,7 +112,7 @@
 
             <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:1.25rem;">
                 <button type="button" class="btn-secondary" onclick="closeCreateTicketModal()">Cancelar</button>
-                <button type="submit" class="btn-primary" style="padding:0.5rem 1.25rem; font-weight:600;">
+                <button type="submit" id="btn-submit-create-ticket" class="btn-primary" style="padding:0.5rem 1.25rem; font-weight:600; display:inline-flex; align-items:center; gap:6px;">
                     Guardar Solicitud
                 </button>
             </div>

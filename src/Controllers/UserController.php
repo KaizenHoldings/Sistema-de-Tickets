@@ -114,10 +114,10 @@ class UserController {
     public function getAllUsers(): array {
         try {
             $stmt = $this->db->query("
-                SELECT u.id, u.name, u.email, u.is_active, u.created_at, u.role_id, u.area_id,
+                SELECT u.id, u.name, u.alias, u.email, u.is_active, u.created_at, u.role_id, u.area_id,
                        r.name as role_name, r.description as role_description,
                        a.name as area_name,
-                       (SELECT COUNT(*) FROM tickets t WHERE t.assigned_agent_id = u.id) as assigned_tickets_count,
+                       (SELECT COUNT(*) FROM tickets t WHERE t.assigned_agent_id = u.id OR (t.responsable IS NOT NULL AND TRIM(t.responsable) != '' AND (LOWER(TRIM(t.responsable)) = LOWER(u.alias) OR LOWER(TRIM(t.responsable)) = LOWER(u.name)))) as assigned_tickets_count,
                        (SELECT COUNT(*) FROM tickets t WHERE t.requester_id = u.id) as created_tickets_count
                 FROM users u
                 INNER JOIN roles r ON u.role_id = r.id
@@ -136,7 +136,7 @@ class UserController {
     public function getUserById(int $id): array {
         try {
             $stmt = $this->db->prepare("
-                SELECT u.id, u.name, u.email, u.is_active, u.created_at, u.role_id, u.area_id,
+                SELECT u.id, u.name, u.alias, u.email, u.is_active, u.created_at, u.role_id, u.area_id,
                        r.name as role_name, r.description as role_description,
                        a.name as area_name
                 FROM users u
@@ -168,6 +168,7 @@ class UserController {
             }
 
             $name = trim($data['name'] ?? '');
+            $alias = trim($data['alias'] ?? '') ?: $name;
             $email = strtolower(trim($data['email'] ?? ''));
             $password = $data['password'] ?? 'password123';
             $roleId = (int)($data['role_id'] ?? 3);
@@ -190,11 +191,12 @@ class UserController {
             $passwordHash = password_hash($password, PASSWORD_DEFAULT);
 
             $stmt = $this->db->prepare("
-                INSERT INTO users (name, email, password_hash, role_id, area_id, is_active)
-                VALUES (:name, :email, :password_hash, :role_id, :area_id, 1)
+                INSERT INTO users (name, alias, email, password_hash, role_id, area_id, is_active)
+                VALUES (:name, :alias, :email, :password_hash, :role_id, :area_id, 1)
             ");
             $stmt->execute([
                 ':name' => $name,
+                ':alias' => $alias,
                 ':email' => $email,
                 ':password_hash' => $passwordHash,
                 ':role_id' => $roleId,
@@ -209,7 +211,7 @@ class UserController {
     }
 
     /**
-     * Modificar un usuario existente (nombre, email, departamento, rol, y contraseña opcional)
+     * Modificar un usuario existente (nombre, alias, email, departamento, rol, y contraseña opcional)
      */
     public function updateUser(int $userId, array $data, array $currentUser): array {
         try {
@@ -226,6 +228,7 @@ class UserController {
             }
 
             $name = trim($data['name'] ?? '');
+            $alias = trim($data['alias'] ?? '') ?: $name;
             $email = strtolower(trim($data['email'] ?? ''));
             $roleId = isset($data['role_id']) ? (int)$data['role_id'] : (int)$targetUser['role_id'];
             $areaId = !empty($data['area_id']) ? (int)$data['area_id'] : null;
@@ -251,9 +254,10 @@ class UserController {
             }
 
             // Actualizar campos básicos
-            $fields = "name = :name, email = :email, role_id = :role_id, area_id = :area_id";
+            $fields = "name = :name, alias = :alias, email = :email, role_id = :role_id, area_id = :area_id";
             $params = [
                 ':name' => $name,
+                ':alias' => $alias,
                 ':email' => $email,
                 ':role_id' => $roleId,
                 ':area_id' => $areaId,
@@ -271,6 +275,14 @@ class UserController {
 
             $stmt = $this->db->prepare("UPDATE users SET {$fields} WHERE id = :id");
             $stmt->execute($params);
+
+            // Si el usuario editado es el usuario en sesión, actualizar sesión
+            if ($userId === (int)($currentUser['id'] ?? 0)) {
+                if (session_status() === PHP_SESSION_ACTIVE) {
+                    $_SESSION['user']['name'] = $name;
+                    $_SESSION['user']['alias'] = $alias;
+                }
+            }
 
             return ['success' => true, 'message' => "Usuario {$name} actualizado correctamente."];
 
@@ -435,6 +447,269 @@ class UserController {
             return ['success' => true, 'message' => 'Rol de usuario actualizado correctamente.'];
         } catch (Exception $e) {
             return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Obtener estadísticas completas del perfil del usuario (conteo de tickets, tiempo promedio y dificultad)
+     */
+    public function getUserProfileStats(array $currentUser): array {
+        try {
+            $userId = (int)$currentUser['id'];
+            $userName = trim($currentUser['name'] ?? '');
+            $userEmail = trim($currentUser['email'] ?? '');
+
+            // Obtener alias de la BD si no viene en sesión
+            $stmtUserRow = $this->db->prepare("SELECT alias, name FROM users WHERE id = :uid");
+            $stmtUserRow->execute([':uid' => $userId]);
+            $uRow = $stmtUserRow->fetch(PDO::FETCH_ASSOC);
+            $userAlias = trim($uRow['alias'] ?? $currentUser['alias'] ?? $userName);
+            if (!empty($uRow['name'])) $userName = $uRow['name'];
+
+            // 1. Obtener todos los tickets asignados a este usuario (por id o por alias/nombre en SharePoint)
+            $stmtTickets = $this->db->prepare("
+                SELECT t.id, t.code, t.title, t.priority, t.status_id, t.created_at, t.updated_at, 
+                       t.due_date, t.is_sla_breached, t.resolved_at, t.sp_status, t.company_name, t.area_code,
+                       ks.name as status_name, ks.slug as status_slug,
+                       a.name as area_name
+                FROM tickets t
+                LEFT JOIN kanban_status ks ON t.status_id = ks.id
+                LEFT JOIN areas a ON t.area_id = a.id
+                WHERE t.assigned_agent_id = :uid 
+                   OR (t.responsable IS NOT NULL AND TRIM(t.responsable) != '' AND (
+                       LOWER(TRIM(t.responsable)) = LOWER(:uname) 
+                       OR LOWER(TRIM(t.responsable)) = LOWER(:ualias)
+                   ))
+                ORDER BY t.created_at DESC
+            ");
+            $stmtTickets->execute([
+                ':uid'    => $userId, 
+                ':uname'  => $userName,
+                ':ualias' => $userAlias
+            ]);
+            $assignedTickets = $stmtTickets->fetchAll(PDO::FETCH_ASSOC);
+
+            // 2. Desglose de conteos y métricas
+            $totalAssigned = count($assignedTickets);
+            $resolvedTickets = [];
+            $activeTickets = [];
+            $prioCounts = ['urgent' => 0, 'high' => 0, 'medium' => 0, 'low' => 0];
+            $resolutionMinutes = [];
+
+            foreach ($assignedTickets as $t) {
+                $statusId = (int)($t['status_id'] ?? 1);
+                $spStatus = mb_strtolower(trim($t['sp_status'] ?? ''));
+                $isResolved = ($statusId === 4 || $spStatus === 'procesado');
+                $prio = strtolower(trim($t['priority'] ?? 'medium'));
+                if (!isset($prioCounts[$prio])) {
+                    $prio = 'medium';
+                }
+                $prioCounts[$prio]++;
+
+                if ($isResolved) {
+                    $resolvedTickets[] = $t;
+                    $created = !empty($t['created_at']) ? strtotime($t['created_at']) : 0;
+                    $resolved = !empty($t['resolved_at']) ? strtotime($t['resolved_at']) : (!empty($t['updated_at']) ? strtotime($t['updated_at']) : 0);
+                    if ($created > 0 && $resolved > $created) {
+                        $resolutionMinutes[] = round(($resolved - $created) / 60);
+                    }
+                } else {
+                    $activeTickets[] = $t;
+                }
+            }
+
+            $resolvedCount = count($resolvedTickets);
+            $activeCount = count($activeTickets);
+
+            // 3. Tickets solicitados (creados por el usuario)
+            $stmtReq = $this->db->prepare("SELECT COUNT(*) FROM tickets WHERE requester_id = :uid");
+            $stmtReq->execute([':uid' => $userId]);
+            $requestedCount = (int)$stmtReq->fetchColumn();
+
+            // 4. Tiempo promedio de resolución
+            $avgResolutionMinutes = !empty($resolutionMinutes) ? (array_sum($resolutionMinutes) / count($resolutionMinutes)) : 0;
+            $fastestResolutionMinutes = !empty($resolutionMinutes) ? min($resolutionMinutes) : 0;
+
+            $formatMinutes = function($minutes) {
+                $minutes = (int)round((float)$minutes);
+                if ($minutes <= 0) return 'Sin registros';
+                $hours = intdiv($minutes, 60);
+                $mins = $minutes % 60;
+                if ($hours >= 24) {
+                    $days = round($hours / 24, 1);
+                    return "{$days} días (" . $hours . " h)";
+                }
+                if ($hours > 0) {
+                    return "{$hours}h {$mins}m";
+                }
+                return "{$mins} min";
+            };
+
+            $avgResolutionText = $formatMinutes($avgResolutionMinutes);
+            $fastestResolutionText = $formatMinutes($fastestResolutionMinutes);
+
+            // 5. Cálculo y Ponderación de Dificultad (Complejidad de tickets)
+            // Escala de Dificultad: Baja = 1, Media = 2, Alta = 3, Urgente = 4
+            $totalPrio = max(1, $totalAssigned);
+            $difficultyScore = round(
+                (($prioCounts['urgent'] * 4) + ($prioCounts['high'] * 3) + ($prioCounts['medium'] * 2) + ($prioCounts['low'] * 1)) / $totalPrio,
+                1
+            );
+
+            if ($totalAssigned === 0) {
+                $difficultyScore = 2.0;
+                $difficultyLabel = 'Estándar / Normal';
+                $difficultyColor = '#0284C7';
+                $difficultyBadgeClass = 'prio-medium';
+            } elseif ($difficultyScore >= 3.3) {
+                $difficultyLabel = 'Muy Alta / Crítica';
+                $difficultyColor = '#DC2626';
+                $difficultyBadgeClass = 'prio-urgent';
+            } elseif ($difficultyScore >= 2.5) {
+                $difficultyLabel = 'Alta';
+                $difficultyColor = '#EA580C';
+                $difficultyBadgeClass = 'prio-high';
+            } elseif ($difficultyScore >= 1.7) {
+                $difficultyLabel = 'Media';
+                $difficultyColor = '#D97706';
+                $difficultyBadgeClass = 'prio-medium';
+            } else {
+                $difficultyLabel = 'Baja';
+                $difficultyColor = '#059669';
+                $difficultyBadgeClass = 'prio-low';
+            }
+
+            $prioPercentages = [
+                'urgent' => round(($prioCounts['urgent'] / $totalPrio) * 100),
+                'high' => round(($prioCounts['high'] / $totalPrio) * 100),
+                'medium' => round(($prioCounts['medium'] / $totalPrio) * 100),
+                'low' => round(($prioCounts['low'] / $totalPrio) * 100)
+            ];
+
+            // 6. Cumplimiento SLA del agente
+            $inSlaCount = 0;
+            foreach ($assignedTickets as $t) {
+                if ((int)($t['is_sla_breached'] ?? 0) === 0) {
+                    $inSlaCount++;
+                }
+            }
+            $slaComplianceRate = ($totalAssigned > 0) ? round(($inSlaCount / $totalAssigned) * 100, 1) . '%' : '100%';
+
+            // 7. Actividad reciente del usuario
+            $stmtAct = $this->db->prepare("
+                SELECT c.comment as comment_text, c.created_at, c.is_internal,
+                       t.id as ticket_id, t.code as ticket_code, t.title as ticket_title
+                FROM ticket_comments c
+                JOIN tickets t ON c.ticket_id = t.id
+                WHERE c.user_id = :uid
+                ORDER BY c.created_at DESC
+                LIMIT 6
+            ");
+            $stmtAct->execute([':uid' => $userId]);
+            $recentActivity = $stmtAct->fetchAll(PDO::FETCH_ASSOC);
+
+            return [
+                'success' => true,
+                'data' => [
+                    'user' => [
+                        'id' => $userId,
+                        'name' => $userName,
+                        'alias' => $userAlias,
+                        'email' => $userEmail,
+                        'role_name' => $currentUser['role_name'] ?? 'colaborador',
+                        'area_name' => $currentUser['area_name'] ?? 'General',
+                        'created_at' => $currentUser['created_at'] ?? date('Y-m-d')
+                    ],
+                    'counts' => [
+                        'assigned' => $totalAssigned,
+                        'resolved' => $resolvedCount,
+                        'active' => $activeCount,
+                        'requested' => $requestedCount,
+                        'resolution_rate' => ($totalAssigned > 0) ? round(($resolvedCount / $totalAssigned) * 100, 1) : 0
+                    ],
+                    'timing' => [
+                        'avg_resolution' => $avgResolutionText,
+                        'avg_minutes' => round($avgResolutionMinutes),
+                        'fastest_resolution' => $fastestResolutionText,
+                        'sla_compliance' => $slaComplianceRate
+                    ],
+                    'difficulty' => [
+                        'score' => $difficultyScore,
+                        'max_score' => 4.0,
+                        'label' => $difficultyLabel,
+                        'color' => $difficultyColor,
+                        'badge_class' => $difficultyBadgeClass,
+                        'counts' => $prioCounts,
+                        'percentages' => $prioPercentages
+                    ],
+                    'active_tickets' => array_slice($activeTickets, 0, 10),
+                    'recent_activity' => $recentActivity
+                ]
+            ];
+        } catch (\Throwable $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Actualizar datos personales y alias/siglas de SharePoint del usuario autenticado
+     */
+    public function updateOwnProfile(int $userId, array $data, array $currentUser): array {
+        try {
+            $name = trim($data['name'] ?? '');
+            $alias = trim($data['alias'] ?? '') ?: $name;
+
+            if (empty($name)) {
+                return ['success' => false, 'message' => 'El nombre completo es obligatorio.'];
+            }
+
+            if (empty($alias)) {
+                $alias = $name;
+            }
+
+            $stmt = $this->db->prepare("UPDATE users SET name = :name, alias = :alias WHERE id = :id");
+            $stmt->execute([
+                ':name'  => $name,
+                ':alias' => $alias,
+                ':id'    => $userId
+            ]);
+
+            // Actualizar la sesión activa inmediatamente
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                $_SESSION['user']['name'] = $name;
+                $_SESSION['user']['alias'] = $alias;
+            }
+
+            return [
+                'success' => true, 
+                'message' => 'Datos personales y alias actualizados exitosamente.',
+                'data' => ['name' => $name, 'alias' => $alias]
+            ];
+        } catch (\Throwable $e) {
+            return ['success' => false, 'message' => 'Error al actualizar perfil: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * Actualizar contraseña propia del usuario autenticado
+     */
+    public function updateOwnPassword(int $userId, string $currentPassword, string $newPassword): array {
+        try {
+            if (strlen($newPassword) < 6) {
+                return ['success' => false, 'message' => 'La nueva contraseña debe tener al menos 6 caracteres.'];
+            }
+            $stmt = $this->db->prepare("SELECT password_hash FROM users WHERE id = :id");
+            $stmt->execute([':id' => $userId]);
+            $hash = $stmt->fetchColumn();
+            if (!$hash || !password_verify($currentPassword, $hash)) {
+                return ['success' => false, 'message' => 'La contraseña actual ingresada es incorrecta.'];
+            }
+            $newHash = password_hash($newPassword, PASSWORD_DEFAULT);
+            $stmtUp = $this->db->prepare("UPDATE users SET password_hash = :hash WHERE id = :id");
+            $stmtUp->execute([':hash' => $newHash, ':id' => $userId]);
+            return ['success' => true, 'message' => 'Contraseña actualizada correctamente.'];
+        } catch (\Throwable $e) {
+            return ['success' => false, 'message' => 'Error: ' . $e->getMessage()];
         }
     }
 }

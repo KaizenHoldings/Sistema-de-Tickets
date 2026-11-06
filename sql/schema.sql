@@ -43,6 +43,7 @@ CREATE TABLE users (
     area_id INT NULL,
     role_id INT NOT NULL,
     name VARCHAR(100) NOT NULL,
+    alias VARCHAR(100) NULL,
     email VARCHAR(150) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     is_active TINYINT(1) DEFAULT 1,

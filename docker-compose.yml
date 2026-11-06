@@ -16,6 +16,11 @@ services:
       SUPERADMIN_NAME: ${SUPERADMIN_NAME:-SuperAdmin Sistema}
       SUPERADMIN_EMAIL: ${SUPERADMIN_EMAIL:-superadmin@empresa.com}
       SUPERADMIN_PASSWORD: ${SUPERADMIN_PASSWORD:-password123}
+      GRAPH_TENANT_ID: ${GRAPH_TENANT_ID:-}
+      GRAPH_CLIENT_ID: ${GRAPH_CLIENT_ID:-}
+      GRAPH_CLIENT_SECRET: ${GRAPH_CLIENT_SECRET:-}
+      VITE_SHAREPOINT_SITE_ID: ${VITE_SHAREPOINT_SITE_ID:-}
+      VITE_LIST_NAME: ${VITE_LIST_NAME:-Solicitudes - SSGG e IT}
     volumes:
       - .:/var/www/html
     depends_on:

@@ -24,6 +24,20 @@ AuthMiddleware::startSession();
 $currentUser = AuthMiddleware::requireAuth();
 $csrfToken = AuthMiddleware::getCsrfToken();
 
+// Asegurar que el alias del usuario en sesión esté siempre cargado
+if (empty($currentUser['alias']) && !empty($currentUser['id'])) {
+    try {
+        $dbConn = \Config\Database::getConnection();
+        $stmtUserAlias = $dbConn->prepare("SELECT alias, name FROM users WHERE id = :id");
+        $stmtUserAlias->execute([':id' => $currentUser['id']]);
+        $rowA = $stmtUserAlias->fetch(PDO::FETCH_ASSOC);
+        $currentUser['alias'] = $rowA['alias'] ?? ($rowA['name'] ?? $currentUser['name']);
+        if (!empty($rowA['name'])) $currentUser['name'] = $rowA['name'];
+        $_SESSION['user']['alias'] = $currentUser['alias'];
+        $_SESSION['user']['name'] = $currentUser['name'];
+    } catch (\Throwable $e) {}
+}
+
 // Auto-verificar superadmin (.env), esquema y sanear codificación
 try {
     UserController::ensureSuperAdminExists();
@@ -57,15 +71,17 @@ $tabAliases = [
     'dashboard'   => 'dashboard-tab',
     'tickets'     => 'tickets-tab',
     'my-requests' => 'my-requests-tab',
-    'pending'     => 'pending-tab',
-    'pendientes'  => 'pending-tab',
+    'pending'     => 'tickets-tab',
+    'pendientes'  => 'tickets-tab',
     'inbox'       => 'inbox-tab',
     'reports'     => 'reports-tab',
+    'profile'     => 'profile-tab',
+    'perfil'      => 'profile-tab',
     'admin'       => 'admin-tab'
 ];
 $rawTab = $_GET['tab'] ?? '';
 $activeTab = $tabAliases[$rawTab] ?? ($rawTab ?: 'dashboard-tab');
-$validTabs = ['dashboard-tab', 'tickets-tab', 'my-requests-tab', 'pending-tab', 'inbox-tab', 'reports-tab', 'admin-tab'];
+$validTabs = ['dashboard-tab', 'tickets-tab', 'my-requests-tab', 'inbox-tab', 'reports-tab', 'profile-tab', 'admin-tab'];
 if (!in_array($activeTab, $validTabs, true)) {
     $activeTab = 'dashboard-tab';
 }
@@ -125,8 +141,14 @@ try {
     $resMyReq = $ticketCtrl->getMyRequestedTickets($userId);
     $myRequests = $resMyReq['success'] ? $resMyReq['data'] : [];
 
+    $resMyAssigned = $ticketCtrl->getMyAssignedTickets($currentUser);
+    $myAssignedTickets = $resMyAssigned['success'] ? $resMyAssigned['data'] : [];
+
     $resUnassigned = $ticketCtrl->getUnassignedTickets($areaFilter, $currentUser);
     $unassignedTickets = $resUnassigned['success'] ? $resUnassigned['data'] : [];
+
+    $resProfile = $userCtrl->getUserProfileStats($currentUser);
+    $userProfile = $resProfile['success'] ? $resProfile['data'] : null;
 
     // Tickets Pendientes de Atención (En curso, sin asignar o en espera, excluyendo Procesados/Resueltos)
     $pendingTickets = array_values(array_filter($allTickets, function($t) {
@@ -279,9 +301,9 @@ $userInitials = strtoupper(substr($currentUser['name'] ?? 'U', 0, 2));
             <?php include __DIR__ . '/../views/tabs/dashboard.php'; ?>
             <?php include __DIR__ . '/../views/tabs/tickets.php'; ?>
             <?php include __DIR__ . '/../views/tabs/my-requests.php'; ?>
-            <?php include __DIR__ . '/../views/tabs/pending.php'; ?>
             <?php include __DIR__ . '/../views/tabs/inbox.php'; ?>
             <?php include __DIR__ . '/../views/tabs/reports.php'; ?>
+            <?php include __DIR__ . '/../views/tabs/profile.php'; ?>
             <?php if ($currentUser['role_name'] === 'admin'): ?>
                 <?php include __DIR__ . '/../views/tabs/admin.php'; ?>
             <?php endif; ?>
