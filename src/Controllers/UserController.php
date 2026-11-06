@@ -30,6 +30,17 @@ class UserController {
             // Asegurar que el rol 'admin' exista con ID 1
             $db->exec("INSERT IGNORE INTO roles (id, name, description) VALUES (1, 'admin', 'Superadministrador')");
 
+            // Asegurar que la columna 'alias' exista en la tabla users
+            try {
+                $colAlias = $db->query("SHOW COLUMNS FROM users LIKE 'alias'")->fetch();
+                if (!$colAlias) {
+                    $db->exec("ALTER TABLE users ADD COLUMN alias VARCHAR(100) NULL AFTER name");
+                    $db->exec("UPDATE users SET alias = name WHERE alias IS NULL OR alias = ''");
+                }
+            } catch (Exception $eCol) {
+                // Silencioso si ya existe o no tiene permisos DDL
+            }
+
             // Buscar si ya existe el usuario por su correo
             $stmt = $db->prepare("SELECT id, email, password_hash, role_id, is_active FROM users WHERE LOWER(email) = :email LIMIT 1");
             $stmt->execute([':email' => $email]);

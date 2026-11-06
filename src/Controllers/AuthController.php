@@ -26,8 +26,25 @@ class AuthController {
                 return ['success' => false, 'message' => 'Ingrese correo y contraseña.'];
             }
 
+            // Asegurar compatibilidad de columna alias
+            $hasAlias = false;
+            try {
+                $colCheck = $this->db->query("SHOW COLUMNS FROM users LIKE 'alias'")->fetch();
+                if (!$colCheck) {
+                    $this->db->exec("ALTER TABLE users ADD COLUMN alias VARCHAR(100) NULL AFTER name");
+                    $this->db->exec("UPDATE users SET alias = name WHERE alias IS NULL OR alias = ''");
+                    $hasAlias = true;
+                } else {
+                    $hasAlias = true;
+                }
+            } catch (\Exception $eCol) {
+                $hasAlias = false;
+            }
+
+            $aliasSelect = $hasAlias ? "u.alias," : "u.name as alias,";
+
             $stmt = $this->db->prepare("
-                SELECT u.id, u.name, u.alias, u.email, u.password_hash, u.is_active, u.area_id,
+                SELECT u.id, u.name, {$aliasSelect} u.email, u.password_hash, u.is_active, u.area_id,
                        r.id as role_id, r.name as role_name,
                        a.name as area_name
                 FROM users u
@@ -75,7 +92,8 @@ class AuthController {
             ];
 
         } catch (Exception $e) {
-            return ['success' => false, 'message' => 'Error interno de autenticación: ' . $e->getMessage()];
+            error_log("Error interno de autenticación: " . $e->getMessage());
+            return ['success' => false, 'message' => 'Credenciales inválidas o error de conexión. Verifique sus datos.'];
         }
     }
 

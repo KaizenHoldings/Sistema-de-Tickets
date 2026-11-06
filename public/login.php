@@ -41,6 +41,7 @@ require_once __DIR__ . '/../src/Controllers/UserController.php';
             width: 100%;
             max-width: 440px;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.06);
+            transition: transform 0.2s ease;
         }
         .login-brand {
             display: flex;
@@ -64,18 +65,61 @@ require_once __DIR__ . '/../src/Controllers/UserController.php';
             font-weight: 800;
             font-size: 1.25rem;
         }
+        .login-alert-box {
+            display: none;
+            align-items: flex-start;
+            gap: 0.65rem;
+            background-color: #FEF2F2;
+            border: 1px solid #FECACA;
+            border-left: 4px solid #EF4444;
+            color: #991B1B;
+            font-size: 0.85rem;
+            font-weight: 500;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.25rem;
+            line-height: 1.4;
+            animation: fadeInDown 0.25s ease-out;
+        }
+        .login-alert-icon {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+            margin-top: 1px;
+            color: #EF4444;
+        }
+        @keyframes fadeInDown {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .shake-card {
+            animation: shake 0.4s ease-in-out;
+        }
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-6px); }
+            40%, 80% { transform: translateX(6px); }
+        }
     </style>
 </head>
 <body>
 
-    <div class="login-card">
+    <div class="login-card" id="loginCard">
         <div class="login-brand">
             <div class="login-brand-icon">K</div>
             <span>Kaizen ServiceDesk</span>
         </div>
-        <p style="text-align: center; color: var(--fd-text-muted); font-size: 0.88rem; margin-bottom: 1.75rem;">
+        <p style="text-align: center; color: var(--fd-text-muted); font-size: 0.88rem; margin-bottom: 1.5rem;">
             Servicio de asistencia técnica : Kaizen
         </p>
+
+        <!-- Alerta visual integrada y amigable (sin popups de navegador) -->
+        <div id="login-alert-box" class="login-alert-box" role="alert">
+            <svg class="login-alert-icon" viewBox="0 0 20 20" fill="currentColor">
+                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.28 7.22a.75.75 0 00-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 101.06 1.06L10 11.06l1.72 1.72a.75.75 0 101.06-1.06L11.06 10l1.72-1.72a.75.75 0 00-1.06-1.06L10 8.94 8.28 7.22z" clip-rule="evenodd"/>
+            </svg>
+            <div id="login-alert-msg" style="flex:1;">Credenciales incorrectas. Verifique su correo y contraseña.</div>
+        </div>
 
         <form id="login-form">
             <div class="form-group">
@@ -88,21 +132,44 @@ require_once __DIR__ . '/../src/Controllers/UserController.php';
                 <input type="password" id="password" name="password" class="form-control" placeholder="••••••••" required style="padding:0.6rem 0.85rem;">
             </div>
 
-            <button type="submit" class="btn-primary" style="width: 100%; padding:0.7rem; font-size:14px; margin-top: 0.5rem; justify-content:center;">
+            <button type="submit" id="btn-submit" class="btn-primary" style="width: 100%; padding:0.7rem; font-size:14px; margin-top: 0.5rem; justify-content:center; transition: all 0.2s;">
                 Ingresar al Sistema
             </button>
         </form>
     </div>
 
     <script>
-        document.getElementById('login-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const email = document.getElementById('email').value;
-            const password = document.getElementById('password').value;
-            executeLogin(email, password);
-        });
+        const loginForm = document.getElementById('login-form');
+        const loginCard = document.getElementById('loginCard');
+        const alertBox = document.getElementById('login-alert-box');
+        const alertMsg = document.getElementById('login-alert-msg');
+        const btnSubmit = document.getElementById('btn-submit');
+        const passInput = document.getElementById('password');
 
-        async function executeLogin(email, password) {
+        function showError(message) {
+            alertMsg.textContent = message || 'Credenciales incorrectas. Por favor verifique sus datos.';
+            alertBox.style.display = 'flex';
+            loginCard.classList.remove('shake-card');
+            void loginCard.offsetWidth; // Forzar reflow para reiniciar animación
+            loginCard.classList.add('shake-card');
+            passInput.value = '';
+            passInput.focus();
+        }
+
+        function hideError() {
+            alertBox.style.display = 'none';
+        }
+
+        loginForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value.trim();
+            const password = passInput.value;
+            if (!email || !password) return;
+
+            hideError();
+            btnSubmit.disabled = true;
+            btnSubmit.innerHTML = 'Verificando credenciales...';
+
             try {
                 const response = await fetch('api.php?action=login', {
                     method: 'POST',
@@ -112,14 +179,20 @@ require_once __DIR__ . '/../src/Controllers/UserController.php';
 
                 const result = await response.json();
                 if (result.success) {
+                    btnSubmit.innerHTML = '✓ Acceso concedido';
+                    btnSubmit.style.backgroundColor = '#10B981';
                     window.location.href = 'index.php';
                 } else {
-                    alert(result.message || 'Credenciales incorrectas');
+                    showError(result.message || 'Credenciales incorrectas. Verifique su correo y contraseña.');
+                    btnSubmit.disabled = false;
+                    btnSubmit.innerHTML = 'Ingresar al Sistema';
                 }
             } catch (e) {
-                alert('Error al conectar con el servidor.');
+                showError('Error de comunicación con el servidor. Intente nuevamente.');
+                btnSubmit.disabled = false;
+                btnSubmit.innerHTML = 'Ingresar al Sistema';
             }
-        }
+        });
     </script>
 </body>
 </html>
