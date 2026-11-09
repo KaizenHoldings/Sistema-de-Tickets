@@ -950,11 +950,17 @@ class TicketController {
 
     /**
      * Eliminar un ticket (con verificación de permisos, limpieza de adjuntos y cascada DB/SharePoint)
+     * 
+     * @param int $ticketId ID del ticket local
+     * @param array $currentUser Usuario en sesión
+     * @param bool $deleteInSharePoint Si es true y el ticket está vinculado a SharePoint, se elimina en SharePoint
+     * @param bool $dryRun Modo seguro para no modificar producción de SharePoint en tests
+     * @param bool $forceLocal Si falla SharePoint, permitir forzar la eliminación local si es true
      */
-    public function deleteTicket(int $ticketId, array $currentUser, bool $deleteInSharePoint = false, bool $dryRun = false): array {
+    public function deleteTicket(int $ticketId, array $currentUser, bool $deleteInSharePoint = true, bool $dryRun = false, bool $forceLocal = false): array {
         try {
             $stmt = $this->db->prepare("
-                SELECT id, code, title, area_id, requester_id, status_id, sharepoint_id, attachment_path 
+                SELECT id, code, title, area_id, requester_id, assigned_agent_id, status_id, sharepoint_id, attachment_path 
                 FROM tickets 
                 WHERE id = :id 
                 LIMIT 1
@@ -971,11 +977,14 @@ class TicketController {
             $userAreaId = (int)($currentUser['area_id'] ?? 0);
 
             $isAdmin = ($role === 'admin');
-            $isAreaManager = ($role === 'manager' && (int)$ticket['area_id'] === $userAreaId);
+            $isManager = ($role === 'manager');
+            $isAreaManager = ($isManager && ((int)$ticket['area_id'] === $userAreaId || $userAreaId === 0));
+            $isAreaStaff = in_array($role, ['colaborador', 'agent'], true) && ((int)$ticket['area_id'] === $userAreaId || $userAreaId === 0);
+            $isAssignedAgent = (!empty($ticket['assigned_agent_id']) && (int)$ticket['assigned_agent_id'] === $userId);
             $isOwner = ((int)$ticket['requester_id'] === $userId);
 
-            // Permisos: Superadmin, Manager del área correspondiente, o el solicitante si está en estado inicial (1)
-            $canDelete = $isAdmin || $isAreaManager || ($isOwner && (int)$ticket['status_id'] === 1);
+            // Permisos: Superadmin, Manager, colaboradores del área o asignados, o el solicitante inicial
+            $canDelete = $isAdmin || $isManager || $isAreaStaff || $isAssignedAgent || ($isOwner && (int)$ticket['status_id'] === 1);
 
             if (!$canDelete) {
                 return [
@@ -985,13 +994,34 @@ class TicketController {
                 ];
             }
 
+            // Detectar si tiene ID de SharePoint directamente o por el código del ticket
+            $spId = !empty($ticket['sharepoint_id']) ? (int)$ticket['sharepoint_id'] : 0;
+            if ($spId === 0 && !empty($ticket['code']) && preg_match('/(?:IT|SG)-SP-(\d+)/i', $ticket['code'], $m)) {
+                $spId = (int)$m[1];
+            }
+
             $spNotice = '';
             // Si el ticket está enlazado a SharePoint y se solicitó eliminarlo allí
-            if ($deleteInSharePoint && !empty($ticket['sharepoint_id'])) {
+            if ($deleteInSharePoint && $spId > 0) {
                 $spService = new \Services\SharePointService();
-                $spRes = $spService->deleteSharePointItem((int)$ticket['sharepoint_id'], $dryRun);
-                if (!empty($spRes['message'])) {
-                    $spNotice = ' (' . $spRes['message'] . ')';
+                $spRes = $spService->deleteSharePointItem($spId, $dryRun);
+
+                if (!empty($spRes['success'])) {
+                    $spNotice = " y en SharePoint (ID #{$spId})";
+                } else {
+                    // Si SharePoint falló y no se solicitó forzar eliminación local, frenar la eliminación
+                    if (!$forceLocal) {
+                        return [
+                            'success'           => false,
+                            'sharepoint_failed' => true,
+                            'ticket_id'         => $ticketId,
+                            'code'              => $ticket['code'],
+                            'sharepoint_id'     => $spId,
+                            'message'           => "No se pudo eliminar el registro en SharePoint (ID #{$spId}): " . ($spRes['message'] ?? 'Error de conexión') . ". El ticket no ha sido eliminado en la aplicación para mantener la integridad de los datos. Puede reintentar o elegir forzar la eliminación solo localmente."
+                        ];
+                    } else {
+                        $spNotice = " (Aviso SharePoint: " . ($spRes['message'] ?? 'No se pudo eliminar en SharePoint') . ")";
+                    }
                 }
             }
 
@@ -1008,13 +1038,90 @@ class TicketController {
             $stmtDel->execute([':id' => $ticketId]);
 
             return [
-                'success'   => true,
-                'ticket_id' => $ticketId,
-                'code'      => $ticket['code'],
-                'message'   => "El ticket {$ticket['code']} ha sido eliminado correctamente{$spNotice}."
+                'success'       => true,
+                'ticket_id'     => $ticketId,
+                'code'          => $ticket['code'],
+                'sharepoint_id' => $spId,
+                'message'       => "El ticket {$ticket['code']} ha sido eliminado correctamente de la aplicación{$spNotice}."
             ];
         } catch (\Throwable $e) {
             return ['success' => false, 'message' => 'Error al eliminar el ticket: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * Eliminar únicamente el registro en SharePoint (desvinculando el ticket local)
+     */
+    public function deleteFromSharePointOnly(int $ticketId, array $currentUser, bool $dryRun = false): array {
+        try {
+            $stmt = $this->db->prepare("
+                SELECT id, code, title, area_id, requester_id, assigned_agent_id, sharepoint_id 
+                FROM tickets 
+                WHERE id = :id 
+                LIMIT 1
+            ");
+            $stmt->execute([':id' => $ticketId]);
+            $ticket = $stmt->fetch();
+
+            if (!$ticket) {
+                return ['success' => false, 'message' => 'Ticket no encontrado.', 'code' => 404];
+            }
+
+            $role = $currentUser['role_name'] ?? '';
+            $userId = (int)($currentUser['id'] ?? 0);
+            $userAreaId = (int)($currentUser['area_id'] ?? 0);
+
+            $isAdmin = ($role === 'admin');
+            $isManager = ($role === 'manager');
+            $isAreaStaff = in_array($role, ['colaborador', 'agent'], true) && ((int)$ticket['area_id'] === $userAreaId || $userAreaId === 0);
+            $isAssignedAgent = (!empty($ticket['assigned_agent_id']) && (int)$ticket['assigned_agent_id'] === $userId);
+
+            if (!$isAdmin && !$isManager && !$isAreaStaff && !$isAssignedAgent) {
+                return ['success' => false, 'message' => 'No tiene permisos para desvincular o eliminar este ticket de SharePoint.', 'code' => 403];
+            }
+
+            $spId = !empty($ticket['sharepoint_id']) ? (int)$ticket['sharepoint_id'] : 0;
+            if ($spId === 0 && !empty($ticket['code']) && preg_match('/(?:IT|SG)-SP-(\d+)/i', $ticket['code'], $m)) {
+                $spId = (int)$m[1];
+            }
+
+            if ($spId <= 0) {
+                return ['success' => false, 'message' => 'Este ticket no posee un ID de SharePoint asociado.'];
+            }
+
+            $spService = new \Services\SharePointService();
+            $spRes = $spService->deleteSharePointItem($spId, $dryRun);
+
+            if (!$spRes['success']) {
+                return [
+                    'success' => false,
+                    'message' => "Error al eliminar en SharePoint: " . ($spRes['message'] ?? 'Error desconocido')
+                ];
+            }
+
+            // Desvincular en BD local
+            $stmtUpdate = $this->db->prepare("UPDATE tickets SET sharepoint_id = NULL WHERE id = :id");
+            $stmtUpdate->execute([':id' => $ticketId]);
+
+            // Registrar en auditoría
+            $stmtAudit = $this->db->prepare("
+                INSERT INTO ticket_audit_logs (ticket_id, user_id, action_type, old_value, new_value)
+                VALUES (:ticket_id, :user_id, 'sharepoint_unlink', :old_val, 'Desvinculado / Eliminado en SharePoint')
+            ");
+            $stmtAudit->execute([
+                ':ticket_id' => $ticketId,
+                ':user_id'   => $userId,
+                ':old_val'   => "SharePoint #{$spId}"
+            ]);
+
+            return [
+                'success'       => true,
+                'ticket_id'     => $ticketId,
+                'sharepoint_id' => $spId,
+                'message'       => "El registro #{$spId} fue eliminado exitosamente en SharePoint y desvinculado del ticket local."
+            ];
+        } catch (\Throwable $e) {
+            return ['success' => false, 'message' => 'Excepción: ' . $e->getMessage()];
         }
     }
 }

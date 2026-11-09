@@ -1397,11 +1397,32 @@ async function openTicketModal(ticketId) {
 
             // Control de Visibilidad del Botón "Eliminar Ticket" en el Modal
             const deleteBtn = document.getElementById('btn-delete-ticket-modal');
+            const deleteBtnText = document.getElementById('btn-delete-ticket-modal-text');
             if (deleteBtn) {
-                const canDelete = (window.CURRENT_USER_ROLE === 'admin' 
-                    || (window.CURRENT_USER_ROLE === 'manager' && parseInt(ticket.area_id) === parseInt(window.CURRENT_USER_AREA_ID))
-                    || (parseInt(ticket.requester_id) === parseInt(window.CURRENT_USER_ID) && parseInt(ticket.status_id) === 1));
+                const userRole = (window.CURRENT_USER_ROLE || '').toLowerCase();
+                const isStaff = ['admin', 'manager', 'colaborador', 'agent'].includes(userRole);
+                const isAreaStaff = isStaff && (parseInt(ticket.area_id) === parseInt(window.CURRENT_USER_AREA_ID) || !window.CURRENT_USER_AREA_ID);
+                const isAssigned = (ticket.assigned_agent_id && parseInt(ticket.assigned_agent_id) === parseInt(window.CURRENT_USER_ID));
+                const isOwner = (parseInt(ticket.requester_id) === parseInt(window.CURRENT_USER_ID));
+                
+                const canDelete = (userRole === 'admin' 
+                    || userRole === 'manager'
+                    || isAreaStaff
+                    || isAssigned
+                    || (isOwner && parseInt(ticket.status_id) === 1));
+                    
                 deleteBtn.style.display = canDelete ? 'inline-flex' : 'none';
+                const hasSp = !!((ticket.sharepoint_id && parseInt(ticket.sharepoint_id) > 0) || (ticket.code && ticket.code.includes('-SP-')));
+                if (deleteBtnText) {
+                    deleteBtnText.textContent = hasSp ? 'Eliminar Ticket (App y SharePoint)' : 'Eliminar Ticket';
+                }
+                deleteBtn.title = hasSp ? 'Eliminar ticket localmente y de la lista de SharePoint' : 'Eliminar permanentemente el ticket';
+            }
+
+            const spBadge = document.getElementById('modal-sp-badge');
+            if (spBadge) {
+                const hasSp = !!((ticket.sharepoint_id && parseInt(ticket.sharepoint_id) > 0) || (ticket.code && ticket.code.includes('-SP-')));
+                spBadge.style.display = hasSp ? 'inline-block' : 'none';
             }
 
             loadTicketComments(ticket.id);
@@ -2080,24 +2101,112 @@ async function exportCurrentTicketToSharePoint(ticketId) {
     }
 }
 
+let pendingDeleteTicketData = null;
+
 /**
- * Eliminar un ticket con confirmación interactiva y actualización reactiva de la interfaz
+ * Abrir el modal de confirmación de eliminación con soporte interactivo para SharePoint
  */
-async function deleteTicket(ticketId, ticketCode, sharepointId) {
+function openDeleteTicketConfirmModal(ticketId, ticketCode, sharepointId, ticketTitle) {
     if (!ticketId) return;
     ticketCode = ticketCode || ('#' + ticketId);
-
-    let deleteSharePoint = false;
-    let confirmMsg = `¿Está seguro de que desea eliminar permanentemente el ticket ${ticketCode}?`;
-    if (sharepointId && parseInt(sharepointId) > 0) {
-        confirmMsg += `\n\nEste ticket está vinculado a SharePoint (ID #${sharepointId}).\n¿Desea solicitar también la eliminación del registro en SharePoint?`;
-        deleteSharePoint = true;
+    
+    // Si sharepointId no viene explícito, extraerlo del código si tiene el formato IT-SP-XXXXX / SG-SP-XXXXX
+    if ((!sharepointId || parseInt(sharepointId) <= 0) && ticketCode && ticketCode.includes('-SP-')) {
+        const parts = ticketCode.split('-SP-');
+        if (parts.length > 1 && parseInt(parts[1]) > 0) {
+            sharepointId = parseInt(parts[1], 10);
+        }
     }
-    confirmMsg += `\n\nEsta acción eliminará el ticket, sus comentarios y su historial de auditoría. No se puede revertir.`;
 
-    if (!confirm(confirmMsg)) {
+    // Buscar si el ticket está actualmente en currentTicketData
+    if (currentTicketData && parseInt(currentTicketData.id) === parseInt(ticketId)) {
+        if (!sharepointId && currentTicketData.sharepoint_id) {
+            sharepointId = parseInt(currentTicketData.sharepoint_id, 10);
+        }
+        if (!ticketTitle) {
+            ticketTitle = currentTicketData.title;
+        }
+    }
+
+    pendingDeleteTicketData = {
+        ticketId: parseInt(ticketId, 10),
+        ticketCode: ticketCode,
+        sharepointId: (sharepointId && parseInt(sharepointId) > 0) ? parseInt(sharepointId, 10) : 0,
+        ticketTitle: ticketTitle || ''
+    };
+
+    const modal = document.getElementById('modal-delete-ticket-confirm');
+    if (modal) {
+        const codeEl = document.getElementById('del-modal-code');
+        if (codeEl) codeEl.textContent = ticketCode;
+
+        const titleEl = document.getElementById('del-modal-title');
+        if (titleEl) titleEl.textContent = ticketTitle || 'Esta acción eliminará el registro seleccionado de forma permanente.';
+
+        const spBox = document.getElementById('del-modal-sp-box');
+        const spIdTag = document.getElementById('del-modal-sp-id');
+        const spChk = document.getElementById('del-modal-chk-sp');
+        const spError = document.getElementById('del-modal-sp-error');
+        const forceChk = document.getElementById('del-modal-chk-force');
+
+        if (spError) spError.style.display = 'none';
+        if (forceChk) forceChk.checked = false;
+
+        if (pendingDeleteTicketData.sharepointId > 0) {
+            if (spBox) spBox.style.display = 'block';
+            if (spIdTag) spIdTag.textContent = `ID #${pendingDeleteTicketData.sharepointId}`;
+            if (spChk) spChk.checked = true;
+        } else {
+            if (spBox) spBox.style.display = 'none';
+            if (spChk) spChk.checked = false;
+        }
+
+        modal.style.display = 'flex';
         return;
     }
+
+    // Fallback nativo si el modal HTML no estuviera presente en el DOM
+    let deleteSharePoint = false;
+    let msg = `¿Está seguro de que desea eliminar permanentemente el ticket ${ticketCode}?`;
+    if (pendingDeleteTicketData.sharepointId > 0) {
+        msg += `\n\n📌 Este ticket está vinculado a SharePoint (ID #${pendingDeleteTicketData.sharepointId}).\n¿Desea eliminar también el registro de la lista de SharePoint?`;
+        deleteSharePoint = true;
+    }
+    msg += `\n\nEsta acción no se puede revertir.`;
+
+    if (confirm(msg)) {
+        executeConfirmedDeleteTicketDirect(pendingDeleteTicketData.ticketId, pendingDeleteTicketData.ticketCode, deleteSharePoint, false);
+    }
+}
+
+/**
+ * Cerrar modal de confirmación de eliminación
+ */
+function closeDeleteTicketConfirmModal() {
+    const modal = document.getElementById('modal-delete-ticket-confirm');
+    if (modal) modal.style.display = 'none';
+    pendingDeleteTicketData = null;
+}
+
+/**
+ * Ejecutar eliminación confirmada desde el modal interactivo
+ */
+async function executeConfirmedDeleteTicket() {
+    if (!pendingDeleteTicketData || !pendingDeleteTicketData.ticketId) return;
+
+    const ticketId = pendingDeleteTicketData.ticketId;
+    const ticketCode = pendingDeleteTicketData.ticketCode;
+    const spChk = document.getElementById('del-modal-chk-sp');
+    const deleteSharePoint = spChk ? spChk.checked : (pendingDeleteTicketData.sharepointId > 0);
+    const forceChk = document.getElementById('del-modal-chk-force');
+    const forceLocal = forceChk ? forceChk.checked : false;
+
+    const btn = document.getElementById('btn-del-modal-confirm');
+    const btnText = document.getElementById('btn-del-modal-confirm-text');
+    const originalText = btnText ? btnText.textContent : 'Confirmar Eliminación';
+
+    if (btn) btn.disabled = true;
+    if (btnText) btnText.textContent = deleteSharePoint ? 'Eliminando en App y SharePoint...' : 'Eliminando ticket...';
 
     try {
         const response = await fetch('api.php?action=delete_ticket', {
@@ -2107,8 +2216,9 @@ async function deleteTicket(ticketId, ticketCode, sharepointId) {
                 'X-CSRF-Token': getCsrfToken()
             },
             body: JSON.stringify({
-                ticket_id: parseInt(ticketId, 10),
+                ticket_id: ticketId,
                 delete_sharepoint: deleteSharePoint,
+                force_local: forceLocal,
                 csrf_token: getCsrfToken()
             })
         });
@@ -2118,48 +2228,116 @@ async function deleteTicket(ticketId, ticketCode, sharepointId) {
             result = await response.json();
         } catch (jsonErr) {
             console.error('Error parseando JSON de eliminación:', jsonErr);
-            showToast('El ticket fue procesado en el servidor.', 'info');
+            showToast('El servidor procesó la solicitud.', 'info');
+            closeDeleteTicketConfirmModal();
             return;
         }
 
         if (result && result.success) {
             showToast(result.message || `Ticket ${ticketCode} eliminado con éxito.`, 'success');
+            closeDeleteTicketConfirmModal();
 
-            try {
-                // Cerrar el modal si estaba abierto con este ticket
-                const modal = document.getElementById('ticket-modal');
-                const modalIdInput = document.getElementById('modal-ticket-id-input');
-                if (modal && modalIdInput && parseInt(modalIdInput.value) === parseInt(ticketId, 10)) {
-                    modal.style.display = 'none';
-                }
-
-                // Remover elementos del DOM en todas las tablas y en el kanban
-                document.querySelectorAll(`tr[data-ticket-id="${ticketId}"]`).forEach(el => el.remove());
-                document.querySelectorAll(`.ticket-card[data-ticket-id="${ticketId}"]`).forEach(el => el.remove());
-
-                // Actualizar tablas y paginación si las funciones están disponibles
-                if (typeof filterTicketsGlobal === 'function') {
-                    filterTicketsGlobal();
-                }
-                if (typeof filterMyRequests === 'function') {
-                    filterMyRequests();
-                }
-            } catch (uiErr) {
-                console.warn('Actualización de DOM tras eliminar:', uiErr);
+            // Cerrar el modal de detalle si estaba abierto con este ticket
+            const detailModal = document.getElementById('ticket-modal');
+            const modalIdInput = document.getElementById('modal-ticket-id-input');
+            if (detailModal && modalIdInput && parseInt(modalIdInput.value) === parseInt(ticketId, 10)) {
+                detailModal.style.display = 'none';
             }
+
+            // Remover elementos del DOM reactivamente
+            document.querySelectorAll(`tr[data-ticket-id="${ticketId}"]`).forEach(el => el.remove());
+            document.querySelectorAll(`.ticket-card[data-ticket-id="${ticketId}"]`).forEach(el => el.remove());
+            document.querySelectorAll(`.pending-task-card[data-ticket-id="${ticketId}"]`).forEach(el => el.remove());
+            document.querySelectorAll(`.pending-table-row[data-ticket-id="${ticketId}"]`).forEach(el => el.remove());
+
+            // Actualizar contadores si están en pantalla
+            const totalCountEl = document.getElementById('tickets-total-count');
+            if (totalCountEl && parseInt(totalCountEl.textContent) > 0) {
+                totalCountEl.textContent = parseInt(totalCountEl.textContent) - 1;
+            }
+
+            // Refrescar filtros y vistas activas
+            if (typeof filterTicketsGlobal === 'function') filterTicketsGlobal();
+            if (typeof filterMyRequests === 'function') filterMyRequests();
+            if (typeof filterPendingTasks === 'function') filterPendingTasks();
+        } else if (result && result.sharepoint_failed) {
+            // SharePoint devolvió un error: mostrarlo dentro del modal para que el usuario decida si forzar local
+            const spErrorBox = document.getElementById('del-modal-sp-error');
+            const spErrorText = document.getElementById('del-modal-sp-error-text');
+            if (spErrorBox && spErrorText) {
+                spErrorText.textContent = result.message || 'No se pudo contactar con SharePoint.';
+                spErrorBox.style.display = 'block';
+            }
+            showToast(result.message || 'Error al eliminar en SharePoint.', 'error');
         } else {
             showToast(result ? result.message : 'Error al eliminar el ticket.', 'error');
         }
     } catch (e) {
-        console.error('Error en deleteTicket:', e);
+        console.error('Error en executeConfirmedDeleteTicket:', e);
         showToast('Error de conexión al intentar eliminar el ticket.', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+        if (btnText) btnText.textContent = originalText;
     }
 }
 
+/**
+ * Eliminación directa sin modal (usada en fallback o testing)
+ */
+async function executeConfirmedDeleteTicketDirect(ticketId, ticketCode, deleteSharePoint, forceLocal) {
+    try {
+        const response = await fetch('api.php?action=delete_ticket', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': getCsrfToken()
+            },
+            body: JSON.stringify({
+                ticket_id: parseInt(ticketId, 10),
+                delete_sharepoint: !!deleteSharePoint,
+                force_local: !!forceLocal,
+                csrf_token: getCsrfToken()
+            })
+        });
+
+        const result = await response.json();
+        if (result && result.success) {
+            showToast(result.message || `Ticket ${ticketCode} eliminado con éxito.`, 'success');
+
+            const modal = document.getElementById('ticket-modal');
+            const modalIdInput = document.getElementById('modal-ticket-id-input');
+            if (modal && modalIdInput && parseInt(modalIdInput.value) === parseInt(ticketId, 10)) {
+                modal.style.display = 'none';
+            }
+
+            document.querySelectorAll(`tr[data-ticket-id="${ticketId}"]`).forEach(el => el.remove());
+            document.querySelectorAll(`.ticket-card[data-ticket-id="${ticketId}"]`).forEach(el => el.remove());
+            document.querySelectorAll(`.pending-task-card[data-ticket-id="${ticketId}"]`).forEach(el => el.remove());
+            document.querySelectorAll(`.pending-table-row[data-ticket-id="${ticketId}"]`).forEach(el => el.remove());
+
+            if (typeof filterTicketsGlobal === 'function') filterTicketsGlobal();
+            if (typeof filterMyRequests === 'function') filterMyRequests();
+            if (typeof filterPendingTasks === 'function') filterPendingTasks();
+        } else {
+            showToast(result ? result.message : 'Error al eliminar el ticket.', 'error');
+        }
+    } catch (e) {
+        console.error('Error en executeConfirmedDeleteTicketDirect:', e);
+        showToast('Error de conexión.', 'error');
+    }
+}
+
+/**
+ * Eliminar un ticket con confirmación interactiva y actualización reactiva de la interfaz
+ */
+async function deleteTicket(ticketId, ticketCode, sharepointId) {
+    if (!ticketId) return;
+    openDeleteTicketConfirmModal(ticketId, ticketCode, sharepointId);
+}
 
 function deleteCurrentModalTicket() {
     if (!currentTicketData || !currentTicketData.id) return;
-    deleteTicket(currentTicketData.id, currentTicketData.code, currentTicketData.sharepoint_id);
+    openDeleteTicketConfirmModal(currentTicketData.id, currentTicketData.code, currentTicketData.sharepoint_id, currentTicketData.title);
 }
 
 window.syncModalStatusFromId = syncModalStatusFromId;
@@ -2175,6 +2353,9 @@ window.saveModalSharePointChanges = saveModalSharePointChanges;
 window.exportCurrentTicketToSharePoint = exportCurrentTicketToSharePoint;
 window.deleteTicket = deleteTicket;
 window.deleteCurrentModalTicket = deleteCurrentModalTicket;
+window.openDeleteTicketConfirmModal = openDeleteTicketConfirmModal;
+window.closeDeleteTicketConfirmModal = closeDeleteTicketConfirmModal;
+window.executeConfirmedDeleteTicket = executeConfirmedDeleteTicket;
 window.loadUnassignedTickets = loadUnassignedTickets;
 window.loadNotifications = loadNotifications;
 window.toggleNotificationsDropdown = toggleNotificationsDropdown;

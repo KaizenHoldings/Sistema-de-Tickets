@@ -251,9 +251,19 @@ $countReqResolved = count(array_filter($myReq, fn($t) => (int)($t['status_id'] ?
                                     <?php endif; ?>
                                 </td>
                                 <td style="text-align:right;">
-                                    <button type="button" class="btn-secondary" style="padding:0.3rem 0.65rem; font-size:11px;" onclick="event.stopPropagation(); if(typeof openTicketModal==='function'){openTicketModal(<?= (int)$t['id'] ?>);}">
-                                        Gestionar
-                                    </button>
+                                    <div style="display:inline-flex; gap:0.35rem; align-items:center;">
+                                        <button type="button" class="btn-secondary" style="padding:0.3rem 0.65rem; font-size:11px;" onclick="event.stopPropagation(); if(typeof openTicketModal==='function'){openTicketModal(<?= (int)$t['id'] ?>);}">
+                                            Gestionar
+                                        </button>
+                                        <?php 
+                                            $canDeleteAssigned = ($role === 'admin') || ($role === 'manager') || in_array($role, ['colaborador', 'agent'], true);
+                                        ?>
+                                        <?php if ($canDeleteAssigned): ?>
+                                            <button type="button" class="btn-secondary" style="padding:0.3rem 0.5rem; font-size:11px; color:#DC2626; border-color:#FECACA; background:#FEF2F2;" onclick="event.stopPropagation(); deleteTicket(<?= (int)$t['id'] ?>, '<?= htmlspecialchars($t['code'], ENT_QUOTES) ?>', <?= !empty($t['sharepoint_id']) ? (int)$t['sharepoint_id'] : 0 ?>)" title="Eliminar Ticket (App y SharePoint)">
+                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                            </button>
+                                        <?php endif; ?>
+                                    </div>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
@@ -402,8 +412,8 @@ $countReqResolved = count(array_filter($myReq, fn($t) => (int)($t['status_id'] ?
                                         <button type="button" class="btn-secondary" style="padding:0.3rem 0.65rem; font-size:11px;" onclick="event.stopPropagation(); if(typeof openTicketModal==='function'){openTicketModal(<?= (int)$mr['id'] ?>);}">
                                             Detalle
                                         </button>
-                                        <?php if ($role === 'admin' || $statusId === 1): ?>
-                                            <button type="button" class="btn-secondary" style="padding:0.3rem 0.5rem; font-size:11px; color:#DC2626; border-color:#FECACA; background:#FEF2F2;" onclick="event.stopPropagation(); deleteTicket(<?= (int)$mr['id'] ?>, '<?= htmlspecialchars($mr['code'], ENT_QUOTES) ?>', <?= !empty($mr['sharepoint_id']) ? (int)$mr['sharepoint_id'] : 0 ?>)" title="Eliminar Solicitud">
+                                        <?php if ($role === 'admin' || $role === 'manager' || in_array($role, ['colaborador', 'agent'], true) || $statusId === 1): ?>
+                                            <button type="button" class="btn-secondary" style="padding:0.3rem 0.5rem; font-size:11px; color:#DC2626; border-color:#FECACA; background:#FEF2F2;" onclick="event.stopPropagation(); deleteTicket(<?= (int)$mr['id'] ?>, '<?= htmlspecialchars($mr['code'], ENT_QUOTES) ?>', <?= !empty($mr['sharepoint_id']) ? (int)$mr['sharepoint_id'] : 0 ?>)" title="Eliminar Solicitud (App y SharePoint)">
                                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                                             </button>
                                         <?php endif; ?>

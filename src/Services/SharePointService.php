@@ -946,8 +946,8 @@ class SharePointService {
     /**
      * Eliminar un registro específico en SharePoint mediante Microsoft Graph API DELETE
      *
-     * IMPORTANTE: Respeta el modo seguro 'dry_run' para evitar borrar
-     * registros de la lista de producción de SharePoint durante pruebas locales.
+     * Utiliza cURL de forma prioritaria con fallback a stream context,
+     * garantizando compatibilidad con entornos Windows / XAMPP / Docker / CLI.
      */
     public function deleteSharePointItem(int $itemId, bool $dryRun = false): array {
         $isDryRun = (getenv('SHAREPOINT_DRY_RUN') === 'true') || $dryRun;
@@ -959,31 +959,78 @@ class SharePointService {
             ];
         }
 
+        if ($itemId <= 0) {
+            return [
+                'success' => false,
+                'message' => "ID de registro de SharePoint inválido (#{$itemId})."
+            ];
+        }
+
         try {
             $token = $this->getAccessToken();
             $listId = $this->getListId($token);
             $url = "https://graph.microsoft.com/v1.0/sites/{$this->siteId}/lists/{$listId}/items/{$itemId}";
 
-            $opts = [
-                'http' => [
-                    'method'        => 'DELETE',
-                    'header'        => "Authorization: Bearer {$token}\r\nAccept: application/json\r\n",
-                    'timeout'       => 15,
-                    'ignore_errors' => true
-                ]
-            ];
+            $response = '';
+            $httpCode = 0;
+            $maxAttempts = 3;
 
-            $context = stream_context_create($opts);
-            $response = @file_get_contents($url, false, $context);
+            for ($attempt = 1; $attempt <= $maxAttempts; $attempt++) {
+                if (function_exists('curl_init')) {
+                    $ch = curl_init($url);
+                    curl_setopt($ch, CURLOPT_CUSTOMREQUEST, 'DELETE');
+                    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                        "Authorization: Bearer {$token}",
+                        "Accept: application/json"
+                    ]);
+                    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                    curl_setopt($ch, CURLOPT_TIMEOUT, 20);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+                    $response = curl_exec($ch);
+                    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                    $curlErr = curl_error($ch);
+                    curl_close($ch);
 
-            $statusLine = $http_response_header[0] ?? '';
-            preg_match('{HTTP\/\S*\s(\d{3})}', $statusLine, $match);
-            $httpCode = isset($match[1]) ? (int)$match[1] : 0;
+                    if ($httpCode === 0 && !empty($curlErr)) {
+                        throw new Exception("Error cURL de conexión con Microsoft Graph: {$curlErr}");
+                    }
+                } else {
+                    $opts = [
+                        'http' => [
+                            'method'        => 'DELETE',
+                            'header'        => "Authorization: Bearer {$token}\r\nAccept: application/json\r\n",
+                            'timeout'       => 20,
+                            'ignore_errors' => true
+                        ],
+                        'ssl' => [
+                            'verify_peer'      => false,
+                            'verify_peer_name' => false
+                        ]
+                    ];
+
+                    $context = stream_context_create($opts);
+                    $response = @file_get_contents($url, false, $context);
+
+                    $statusLine = $http_response_header[0] ?? '';
+                    preg_match('{HTTP\/\S*\s(\d{3})}', $statusLine, $match);
+                    $httpCode = isset($match[1]) ? (int)$match[1] : 0;
+                }
+
+                // Si es un error transitorio de SharePoint (503 Service Unavailable, 429 Throttling, 504 Gateway Timeout), reintentar brevemente
+                if (in_array($httpCode, [503, 429, 504], true) && $attempt < $maxAttempts) {
+                    usleep(700000); // 700ms de espera
+                    continue;
+                }
+
+                break;
+            }
 
             if ($httpCode === 204 || ($httpCode >= 200 && $httpCode < 300)) {
                 return [
                     'success'   => true,
                     'http_code' => $httpCode,
+                    'item_id'   => $itemId,
                     'message'   => "Registro #{$itemId} eliminado exitosamente en SharePoint."
                 ];
             }
@@ -992,7 +1039,8 @@ class SharePointService {
                 return [
                     'success'   => true,
                     'http_code' => 404,
-                    'message'   => "El registro #{$itemId} no existía en SharePoint o ya había sido eliminado previamente."
+                    'item_id'   => $itemId,
+                    'message'   => "El registro #{$itemId} ya no existía en SharePoint o había sido eliminado previamente."
                 ];
             }
 
@@ -1009,11 +1057,13 @@ class SharePointService {
             return [
                 'success'   => false,
                 'http_code' => $httpCode,
+                'item_id'   => $itemId,
                 'message'   => "Error en SharePoint (HTTP {$httpCode}): {$errorMsg}"
             ];
         } catch (\Throwable $e) {
             return [
                 'success' => false,
+                'item_id' => $itemId,
                 'message' => 'Excepción al eliminar en SharePoint: ' . $e->getMessage()
             ];
         }

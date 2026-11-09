@@ -61,6 +61,14 @@
                                                     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>Tomar Ticket
                                                 </button>
                                             <?php endif; ?>
+                                            <?php 
+                                                $canDeleteInbox = ($role === 'admin') || ($role === 'manager') || in_array($role, ['colaborador', 'agent'], true);
+                                            ?>
+                                            <?php if ($canDeleteInbox): ?>
+                                                <button class="btn-secondary" style="padding:0.35rem 0.5rem; font-size:12px; margin-left:0.35rem; color:#DC2626; border-color:#FECACA; background:#FEF2F2;" onclick="event.stopPropagation(); deleteTicket(<?= (int)$t['id'] ?>, '<?= htmlspecialchars($t['code'], ENT_QUOTES) ?>', <?= !empty($t['sharepoint_id']) ? (int)$t['sharepoint_id'] : 0 ?>)" title="Eliminar Ticket (App y SharePoint)">
+                                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                                </button>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>

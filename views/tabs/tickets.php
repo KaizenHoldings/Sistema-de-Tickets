@@ -367,11 +367,12 @@
                                                 <?php endif; ?>
                                                 <?php 
                                                     $canDeleteThisTicket = ($role === 'admin') 
-                                                        || ($role === 'manager' && (int)$t['area_id'] === $userAreaId)
+                                                        || ($role === 'manager')
+                                                        || (in_array($role, ['colaborador', 'agent'], true) && ((int)$t['area_id'] === $userAreaId || $userAreaId === 0 || (int)($t['assigned_agent_id'] ?? 0) === (int)$currentUser['id']))
                                                         || ((int)($t['requester_id'] ?? 0) === (int)$currentUser['id'] && (int)$t['status_id'] === 1);
                                                 ?>
                                                 <?php if ($canDeleteThisTicket): ?>
-                                                    <button class="btn-secondary" style="padding:0.3rem 0.5rem; font-size:11px; color:#DC2626; border-color:#FECACA; background:#FEF2F2;" onclick="event.stopPropagation(); deleteTicket(<?= $t['id'] ?>, '<?= htmlspecialchars($t['code'], ENT_QUOTES) ?>', <?= !empty($t['sharepoint_id']) ? (int)$t['sharepoint_id'] : 0 ?>)" title="Eliminar Ticket">
+                                                    <button class="btn-secondary" style="padding:0.3rem 0.5rem; font-size:11px; color:#DC2626; border-color:#FECACA; background:#FEF2F2;" onclick="event.stopPropagation(); deleteTicket(<?= $t['id'] ?>, '<?= htmlspecialchars($t['code'], ENT_QUOTES) ?>', <?= !empty($t['sharepoint_id']) ? (int)$t['sharepoint_id'] : 0 ?>)" title="Eliminar Ticket (App y SharePoint)">
                                                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                                                     </button>
                                                 <?php endif; ?>
@@ -458,11 +459,23 @@
                                                     </span>
                                                 </div>
 
-                                                <div class="ticket-footer">
+                                                <div class="ticket-footer" style="display:flex; justify-content:space-between; align-items:center;">
                                                     <span>
                                                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg><?= $ticket['agent_name'] ? htmlspecialchars($ticket['agent_name']) : '<em style="color:#94a3b8">Sin Asignar</em>' ?>
                                                     </span>
-                                                    <span style="font-size:11px; color:#2563EB;">Ver &rarr;</span>
+                                                    <div style="display:inline-flex; align-items:center; gap:0.4rem;">
+                                                        <?php 
+                                                            $canDeleteCard = ($role === 'admin') 
+                                                                || ($role === 'manager') 
+                                                                || (in_array($role, ['colaborador', 'agent'], true) && ((int)($ticket['area_id'] ?? 0) === $userAreaId || $userAreaId === 0 || (int)($ticket['assigned_agent_id'] ?? 0) === (int)$currentUser['id']));
+                                                        ?>
+                                                        <?php if ($canDeleteCard): ?>
+                                                            <span onclick="event.stopPropagation(); deleteTicket(<?= (int)$ticket['id'] ?>, '<?= htmlspecialchars($ticket['code'], ENT_QUOTES) ?>', <?= !empty($ticket['sharepoint_id']) ? (int)$ticket['sharepoint_id'] : 0 ?>)" title="Eliminar ticket" style="cursor:pointer; color:#EF4444; padding:2px; display:inline-flex; align-items:center;">
+                                                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                                            </span>
+                                                        <?php endif; ?>
+                                                        <span style="font-size:11px; color:#2563EB;">Ver &rarr;</span>
+                                                    </div>
                                                 </div>
                                             </div>
                                         <?php endforeach; ?>

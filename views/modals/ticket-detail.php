@@ -22,6 +22,9 @@
                         <span id="modal-sp-id-tag" style="font-size:11px; padding:2px 8px; border-radius:4px; background:#E0F2FE; color:#0369A1; font-weight:700;">
                             ID: -
                         </span>
+                        <span id="modal-sp-badge" style="display:none; font-size:11px; padding:2px 8px; border-radius:4px; background:#ECFDF5; color:#059669; font-weight:700;">
+                            ● SharePoint
+                        </span>
                         <button type="button" id="btn-export-to-sharepoint" class="btn-secondary" style="display:none; font-size:11px; padding:0.25rem 0.6rem; background:#F0F9FF; color:#0369A1; border:1px solid #BAE6FD; align-items:center; gap:4px; cursor:pointer;" title="Crear este ticket en la lista de SharePoint">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="12 14 16 10 12 6"/><line x1="16" y1="10" x2="6" y2="10"/></svg>Vincular a SharePoint
                         </button>
@@ -136,7 +139,7 @@
                     <div style="display:flex; justify-content:space-between; align-items:center; gap:0.75rem; margin-top:0.25rem;">
                         <button type="button" id="btn-delete-ticket-modal" class="btn-danger" style="display:none; padding:0.45rem 0.9rem; font-size:12px; background:#EF4444; color:#FFFFFF; border:none; border-radius:6px; font-weight:600; cursor:pointer; align-items:center; gap:5px; transition:background 0.2s;" onmouseover="this.style.background='#DC2626'" onmouseout="this.style.background='#EF4444'" onclick="deleteCurrentModalTicket()">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
-                            Eliminar Ticket
+                            <span id="btn-delete-ticket-modal-text">Eliminar Ticket</span>
                         </button>
                         <div style="display:flex; align-items:center; gap:0.75rem; margin-left:auto;">
                             <div id="modal-sp-save-feedback" style="display:none; font-size:12px; padding:0.35rem 0.75rem; border-radius:6px; font-weight:600;"></div>
@@ -209,6 +212,59 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL DE CONFIRMACIÓN DE ELIMINACIÓN DE TICKET (APP + SHAREPOINT) -->
+<div id="modal-delete-ticket-confirm" class="modal-backdrop" style="display:none; z-index:99999;">
+    <div style="background:#FFFFFF; border-radius:12px; max-width:480px; width:90%; padding:1.5rem; box-shadow:0 20px 25px -5px rgba(0,0,0,0.2), 0 10px 10px -5px rgba(0,0,0,0.1); border:1px solid #E2E8F0; margin:auto;">
+        <div style="display:flex; align-items:flex-start; gap:0.9rem; margin-bottom:1rem;">
+            <div style="width:42px; height:42px; border-radius:50%; background:#FEE2E2; color:#DC2626; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+            </div>
+            <div>
+                <h3 style="margin:0 0 0.25rem 0; font-size:16px; font-weight:700; color:#0F172A;">Eliminar Ticket <span id="del-modal-code">#...</span></h3>
+                <p style="margin:0; font-size:13px; color:#64748B; line-height:1.4;" id="del-modal-title">...</p>
+            </div>
+        </div>
+
+        <div id="del-modal-sp-box" style="display:none; background:#F0F9FF; border:1px solid #BAE6FD; border-radius:8px; padding:0.85rem; margin-bottom:1rem;">
+            <div style="display:flex; align-items:center; gap:0.4rem; color:#0369A1; font-weight:700; font-size:12.5px; margin-bottom:0.4rem;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/><polyline points="12 14 16 10 12 6"/><line x1="16" y1="10" x2="6" y2="10"/></svg>
+                <span>Registro vinculado a SharePoint</span>
+                <span id="del-modal-sp-id" style="background:#0284C7; color:#FFFFFF; font-size:11px; padding:1px 6px; border-radius:4px; margin-left:auto;">ID #—</span>
+            </div>
+            <p style="margin:0 0 0.5rem 0; font-size:12px; color:#0C4A6E; line-height:1.35;">
+                Este ticket está registrado en la lista <em>"Solicitudes - SSGG e IT"</em> de Microsoft SharePoint.
+            </p>
+            <label style="display:flex; align-items:flex-start; gap:0.5rem; font-size:12.5px; color:#0F172A; cursor:pointer; font-weight:600; background:#FFFFFF; padding:0.5rem 0.65rem; border-radius:6px; border:1px solid #93C5FD;">
+                <input type="checkbox" id="del-modal-chk-sp" checked style="margin-top:2px; accent-color:#0284C7; cursor:pointer; width:15px; height:15px;">
+                <span>Eliminar también el registro en SharePoint (Sincronización total)</span>
+            </label>
+        </div>
+
+        <div id="del-modal-sp-error" style="display:none; background:#FEF2F2; border:1px solid #FECACA; border-radius:8px; padding:0.75rem; margin-bottom:1rem; font-size:12px; color:#991B1B; line-height:1.4;">
+            <div style="font-weight:700; margin-bottom:0.25rem;">Aviso de SharePoint:</div>
+            <div id="del-modal-sp-error-text"></div>
+            <label style="display:flex; align-items:center; gap:0.4rem; margin-top:0.5rem; cursor:pointer; font-weight:600;">
+                <input type="checkbox" id="del-modal-chk-force" style="accent-color:#DC2626;">
+                <span>Forzar eliminación local en la app a pesar del error en SharePoint</span>
+            </label>
+        </div>
+
+        <div style="background:#FFFBEB; border:1px solid #FDE68A; border-radius:8px; padding:0.75rem; margin-bottom:1.25rem; font-size:12px; color:#92400E; line-height:1.4;">
+            ⚠️ Esta acción es permanente. Se eliminarán comentarios, adjuntos e historial del ticket.
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; gap:0.6rem;">
+            <button type="button" class="btn-secondary" style="padding:0.45rem 1rem; font-size:12.5px;" onclick="closeDeleteTicketConfirmModal()">
+                Cancelar
+            </button>
+            <button type="button" id="btn-del-modal-confirm" class="btn-danger" style="padding:0.45rem 1.1rem; font-size:12.5px; background:#DC2626; color:#FFFFFF; border:none; border-radius:6px; font-weight:600; cursor:pointer; display:inline-flex; align-items:center; gap:5px;" onclick="executeConfirmedDeleteTicket()">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                <span id="btn-del-modal-confirm-text">Confirmar Eliminación</span>
+            </button>
         </div>
     </div>
 </div>

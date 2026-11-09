@@ -88,7 +88,7 @@ try {
     $currentUser = AuthMiddleware::requireAuth();
 
     // VALIDACIÓN CSRF PARA ACCIONES DE ESCRITURA / MODIFICACIÓN (POST)
-    $isWriteAction = in_array($action, ['create_ticket', 'delete_ticket', 'update_kanban_status', 'update_ticket_properties', 'update_sharepoint_ticket', 'export_ticket_to_sharepoint', 'assign_agent', 'pickup_ticket', 'add_comment', 'create_area', 'create_user', 'toggle_user_role', 'submit_csat'], true);
+    $isWriteAction = in_array($action, ['create_ticket', 'delete_ticket', 'delete_from_sharepoint', 'update_kanban_status', 'update_ticket_properties', 'update_sharepoint_ticket', 'export_ticket_to_sharepoint', 'assign_agent', 'pickup_ticket', 'add_comment', 'create_area', 'create_user', 'toggle_user_role', 'submit_csat'], true);
     if ($isWriteAction && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $csrfToken = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? $input['csrf_token'] ?? '';
         if (!AuthMiddleware::validateCsrfToken($csrfToken)) {
@@ -109,9 +109,26 @@ try {
     if ($action === 'delete_ticket') {
         $controller = new TicketController();
         $ticketId = (int)($input['ticket_id'] ?? 0);
-        $deleteSharePoint = !empty($input['delete_sharepoint']);
+        // Si no se especifica explícitamente como false/0, se asume eliminación coordinada en SharePoint
+        $deleteSharePoint = true;
+        if (isset($input['delete_sharepoint'])) {
+            $v = $input['delete_sharepoint'];
+            if ($v === false || $v === 'false' || $v === 0 || $v === '0') {
+                $deleteSharePoint = false;
+            }
+        }
         $dryRun = !empty($input['dry_run']);
-        $response = $controller->deleteTicket($ticketId, $currentUser, $deleteSharePoint, $dryRun);
+        $forceLocal = !empty($input['force_local']);
+        $response = $controller->deleteTicket($ticketId, $currentUser, $deleteSharePoint, $dryRun, $forceLocal);
+        echo json_encode($response);
+        exit;
+    }
+
+    if ($action === 'delete_from_sharepoint') {
+        $controller = new TicketController();
+        $ticketId = (int)($input['ticket_id'] ?? 0);
+        $dryRun = !empty($input['dry_run']);
+        $response = $controller->deleteFromSharePointOnly($ticketId, $currentUser, $dryRun);
         echo json_encode($response);
         exit;
     }
