@@ -319,6 +319,25 @@
 <script>
     let isInternalNoteMode = false;
 
+    function handleCreateCompanyChange(selectEl) {
+        const customContainer = document.getElementById('create_company_custom_container');
+        const customInput = document.getElementById('create_company_name_custom');
+        if (!customContainer) return;
+        if (selectEl && selectEl.value === '__other__') {
+            customContainer.style.display = 'block';
+            if (customInput) {
+                customInput.required = true;
+                customInput.focus();
+            }
+        } else {
+            customContainer.style.display = 'none';
+            if (customInput) {
+                customInput.required = false;
+                customInput.value = '';
+            }
+        }
+    }
+
     function openCreateTicketModal() {
         const chk = document.getElementById('create-sync-sharepoint');
         if (chk) chk.checked = true;
@@ -329,16 +348,39 @@
             submitBtn.style.cursor = 'pointer';
             submitBtn.innerHTML = 'Guardar Solicitud';
         }
-        const today = new Date().toISOString().split('T')[0];
+        const now = new Date();
+        const pad = n => String(n).padStart(2, '0');
+        const localDateTime = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+        const todayDate = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+
         const reqDateInput = document.getElementById('create_request_date');
-        if (reqDateInput && !reqDateInput.value) reqDateInput.value = today;
+        if (reqDateInput) reqDateInput.value = localDateTime;
         const dueDateInput = document.getElementById('create_due_date');
-        if (dueDateInput && !dueDateInput.value) dueDateInput.value = today;
+        if (dueDateInput && !dueDateInput.value) dueDateInput.value = todayDate;
+
+        const customContainer = document.getElementById('create_company_custom_container');
+        const customInput = document.getElementById('create_company_name_custom');
+        const compSelect = document.getElementById('create_company_name');
+        if (customContainer) customContainer.style.display = 'none';
+        if (customInput) {
+            customInput.value = '';
+            customInput.required = false;
+        }
+        if (compSelect && compSelect.value === '__other__') {
+            compSelect.value = 'Kaizen Holdings';
+        }
 
         document.getElementById('create-ticket-modal').style.display = 'flex';
     }
 
     function closeCreateTicketModal() {
+        const customContainer = document.getElementById('create_company_custom_container');
+        const customInput = document.getElementById('create_company_name_custom');
+        if (customContainer) customContainer.style.display = 'none';
+        if (customInput) {
+            customInput.value = '';
+            customInput.required = false;
+        }
         document.getElementById('create-ticket-modal').style.display = 'none';
     }
 

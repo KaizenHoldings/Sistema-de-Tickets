@@ -3,6 +3,12 @@ namespace Config;
 
 require_once __DIR__ . '/../src/Config/Env.php';
 
+// Configurar zona horaria del sistema de tickets (por defecto America/Caracas UTC-4)
+$appTz = \Config\Env::get('APP_TIMEZONE', 'America/Caracas');
+if ($appTz) {
+    @date_default_timezone_set($appTz);
+}
+
 use PDO;
 use PDOException;
 

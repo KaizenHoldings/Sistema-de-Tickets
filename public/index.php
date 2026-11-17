@@ -56,7 +56,13 @@ $pendingCountUnassigned = 0;
 $pendingCountInProgress = 0;
 $pendingCountStandBy = 0;
 $pendingCountUrgent = 0;
-$uniqueCompanies = [];
+$baseDefaultCompanies = [
+    'Inveca' => 'Inveca',
+    'Kaizen Financial Group' => 'Kaizen Financial Group',
+    'Kaizen Holdings' => 'Kaizen Holdings',
+    'Socado' => 'Socado'
+];
+$uniqueCompanies = $baseDefaultCompanies;
 $uniqueStatuses = [];
 $uniqueResponsables = [];
 $uniqueRequesters = [];
@@ -164,8 +170,19 @@ try {
     $pendingCountStandBy = count(array_filter($pendingTickets, fn($t) => (int)($t['status_id'] ?? 1) === 3 || mb_strtolower(trim($t['sp_status'] ?? '')) === 'stand by'));
     $pendingCountUrgent = count(array_filter($pendingTickets, fn($t) => in_array($t['priority'] ?? '', ['urgent', 'high'], true)));
 
-    // Extraer opciones de filtros dinámicamente según lo que existe en los tickets de la tabla (Campos SharePoint)
-    $uniqueCompanies = [];
+    // Extraer opciones de filtros dinámicamente según catálogo SharePoint y tickets
+    $uniqueCompanies = $baseDefaultCompanies;
+    try {
+        $spSvcForCatalog = $spSvc ?? new SharePointService();
+        $catalogCompanies = $spSvcForCatalog->getCompanyCatalog();
+        foreach ($catalogCompanies as $catComp) {
+            $catComp = trim($catComp);
+            if ($catComp !== '') {
+                $uniqueCompanies[$catComp] = $catComp;
+            }
+        }
+    } catch (\Throwable $e) {}
+
     $uniqueStatuses = [
         'Pendiente'  => 'Pendiente',
         'En proceso' => 'En proceso',
@@ -187,13 +204,15 @@ try {
     foreach ($allTickets as $t) {
         // Empresa
         $comp = trim($t['company_name'] ?? $t['requester_name'] ?? '');
-        if (!empty($comp) && !isset($uniqueCompanies[$comp])) {
+        if (!empty($comp)) {
             $uniqueCompanies[$comp] = $comp;
-            $uniqueRequesters[mb_strtolower($comp)] = [
-                'name' => $comp,
-                'email' => $t['requester_email'] ?? '',
-                'label' => $comp
-            ];
+            if (!isset($uniqueRequesters[mb_strtolower($comp)])) {
+                $uniqueRequesters[mb_strtolower($comp)] = [
+                    'name' => $comp,
+                    'email' => $t['requester_email'] ?? '',
+                    'label' => $comp
+                ];
+            }
         }
 
         // Área

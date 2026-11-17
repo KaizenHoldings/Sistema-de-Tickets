@@ -6,15 +6,23 @@ use PDO;
 use Exception;
 
 class SharePointService {
-    private PDO $db;
+    private ?PDO $db = null;
     private string $tenantId;
     private string $clientId;
     private string $clientSecret;
     private string $siteId;
     private string $listName;
 
-    public function __construct() {
-        $this->db = Database::getConnection();
+    public function __construct(?PDO $db = null) {
+        if ($db !== null) {
+            $this->db = $db;
+        } else {
+            try {
+                $this->db = Database::getConnection();
+            } catch (\Throwable $e) {
+                $this->db = null;
+            }
+        }
         $this->loadEnvironment();
     }
 
@@ -528,18 +536,72 @@ class SharePointService {
                 ? implode("\n\n", $descriptionParts) 
                 : "Solicitud originada en SharePoint #{$spId}";
 
-            // 4. Fechas
-            $createdAt = !empty($fields['field_6']) 
-                ? date('Y-m-d H:i:s', strtotime($fields['field_6']))
-                : (!empty($item['createdDateTime']) ? date('Y-m-d H:i:s', strtotime($item['createdDateTime'])) : date('Y-m-d H:i:s'));
+            // 4. Fechas (Evitar horas en cero preservando la hora real de creación del elemento en SharePoint y sin desplazamiento UTC de fecha)
+            $spCreated = !empty($item['createdDateTime']) ? $item['createdDateTime'] : ($fields['Created'] ?? null);
+            if (!empty($spCreated)) {
+                $spCreatedTs = strtotime($spCreated);
+                $timePart = date('H:i:s', $spCreatedTs);
+                $createdDate = date('Y-m-d', $spCreatedTs);
 
-            $dueDate = !empty($fields['field_7']) 
-                ? date('Y-m-d H:i:s', strtotime($fields['field_7'])) 
-                : null;
+                if (!empty($fields['field_6'])) {
+                    $rawField6Date = substr($fields['field_6'], 0, 10);
+                    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawField6Date)) {
+                        $createdAt = "{$rawField6Date} {$timePart}";
+                    } else {
+                        $createdAt = "{$createdDate} {$timePart}";
+                    }
+                } else {
+                    $createdAt = "{$createdDate} {$timePart}";
+                }
+            } else {
+                $rawField6Date = !empty($fields['field_6']) ? substr($fields['field_6'], 0, 10) : '';
+                if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawField6Date)) {
+                    $createdAt = "{$rawField6Date} " . date('H:i:s');
+                } else {
+                    $createdAt = date('Y-m-d H:i:s');
+                }
+            }
 
-            $resolvedAt = ($statusId === 4) 
-                ? (!empty($fields['field_8']) ? date('Y-m-d H:i:s', strtotime($fields['field_8'])) : date('Y-m-d H:i:s')) 
-                : null;
+            if (str_ends_with($createdAt, '00:00:00')) {
+                $fixTime = !empty($spCreated) ? date('H:i:s', strtotime($spCreated)) : date('H:i:s');
+                if ($fixTime === '00:00:00') {
+                    $fixTime = '08:00:00';
+                }
+                $createdAt = substr($createdAt, 0, 10) . ' ' . $fixTime;
+            }
+
+            $dueDate = null;
+            if (!empty($fields['field_7'])) {
+                $rawField7Date = substr($fields['field_7'], 0, 10);
+                if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawField7Date)) {
+                    $dueDate = "{$rawField7Date} 18:00:00";
+                } else {
+                    $dueDate = date('Y-m-d H:i:s', strtotime($fields['field_7']));
+                    if (str_ends_with($dueDate, '00:00:00')) {
+                        $dueDate = substr($dueDate, 0, 10) . ' 18:00:00';
+                    }
+                }
+            }
+
+            $resolvedAt = null;
+            if ($statusId === 4) {
+                if (!empty($fields['field_8'])) {
+                    $rawField8Date = substr($fields['field_8'], 0, 10);
+                    $modTime = !empty($item['lastModifiedDateTime']) ? date('H:i:s', strtotime($item['lastModifiedDateTime'])) : date('H:i:s');
+                    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawField8Date)) {
+                        $resolvedAt = "{$rawField8Date} {$modTime}";
+                    } else {
+                        $resolvedAt = date('Y-m-d H:i:s', strtotime($fields['field_8']));
+                    }
+                } elseif (!empty($item['lastModifiedDateTime'])) {
+                    $resolvedAt = date('Y-m-d H:i:s', strtotime($item['lastModifiedDateTime']));
+                } else {
+                    $resolvedAt = date('Y-m-d H:i:s');
+                }
+                if ($resolvedAt && str_ends_with($resolvedAt, '00:00:00') && !empty($item['lastModifiedDateTime'])) {
+                    $resolvedAt = substr($resolvedAt, 0, 10) . ' ' . date('H:i:s', strtotime($item['lastModifiedDateTime']));
+                }
+            }
 
             // 5. Agente Asignado (Mapeo directo con lo que viene en 'Responsable' de SharePoint)
             $assignedAgentId = null;
@@ -686,6 +748,105 @@ class SharePointService {
             'updated'       => $updated,
             'message'       => $message
         ];
+    }
+
+    /**
+     * Obtener el catálogo oficial y dinámico de empresas desde SharePoint (Choices del campo field_0)
+     * unificado con todos los registros históricos de la base de datos local.
+     */
+    public function getCompanyCatalog(): array {
+        static $cachedCompanies = null;
+        if ($cachedCompanies !== null) {
+            return $cachedCompanies;
+        }
+
+        // 1. Valores base conocidos configurados en la lista de SharePoint
+        $companies = [
+            'Inveca',
+            'Kaizen Financial Group',
+            'Kaizen Holdings',
+            'Socado'
+        ];
+
+        // 2. Consultar choices oficiales del campo field_0 ("EMPRESA") en Microsoft Graph
+        try {
+            $token = $this->getAccessToken();
+            $listId = $this->getListId($token);
+            $url = "https://graph.microsoft.com/v1.0/sites/{$this->siteId}/lists/{$listId}/columns/field_0";
+
+            if (function_exists('curl_init')) {
+                $ch = curl_init($url);
+                curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                    "Authorization: Bearer {$token}",
+                    "Accept: application/json"
+                ]);
+                curl_setopt($ch, CURLOPT_TIMEOUT, 6);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, false);
+                $resp = curl_exec($ch);
+                $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+
+                if ($httpCode >= 200 && $httpCode < 300 && !empty($resp)) {
+                    $colData = json_decode($resp, true);
+                    if (!empty($colData['choice']['choices']) && is_array($colData['choice']['choices'])) {
+                        foreach ($colData['choice']['choices'] as $chName) {
+                            $chName = trim($chName);
+                            if ($chName !== '' && !in_array($chName, $companies, true)) {
+                                $companies[] = $chName;
+                            }
+                        }
+                    }
+                }
+            } else {
+                $opts = [
+                    'http' => [
+                        'method'  => 'GET',
+                        'header'  => "Authorization: Bearer {$token}\r\nAccept: application/json\r\n",
+                        'timeout' => 6,
+                        'ignore_errors' => true
+                    ],
+                    'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
+                ];
+                $res = @file_get_contents($url, false, stream_context_create($opts));
+                if ($res) {
+                    $colData = json_decode($res, true);
+                    if (!empty($colData['choice']['choices']) && is_array($colData['choice']['choices'])) {
+                        foreach ($colData['choice']['choices'] as $chName) {
+                            $chName = trim($chName);
+                            if ($chName !== '' && !in_array($chName, $companies, true)) {
+                                $companies[] = $chName;
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (\Throwable $e) {}
+
+        // 3. Obtener todas las empresas presentes en los tickets de la BD local sin filtros
+        try {
+            if ($this->db) {
+                $stmt = $this->db->query("
+                    SELECT DISTINCT TRIM(company_name) as comp 
+                    FROM tickets 
+                    WHERE company_name IS NOT NULL AND TRIM(company_name) != ''
+                ");
+                while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                    $c = trim($row['comp'] ?? '');
+                    if ($c !== '' && !in_array($c, $companies, true)) {
+                        $companies[] = $c;
+                    }
+                }
+            }
+        } catch (\Throwable $e) {}
+
+        // 4. Limpiar, deduplicar y ordenar alfabéticamente
+        $companies = array_unique(array_filter(array_map('trim', $companies)));
+        sort($companies, SORT_NATURAL | SORT_FLAG_CASE);
+
+        $cachedCompanies = array_values($companies);
+        return $cachedCompanies;
     }
 
 

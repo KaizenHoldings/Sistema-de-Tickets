@@ -112,8 +112,8 @@
 
                     <!-- 6. Fecha de Solicitud -->
                     <div class="fd-prop-group">
-                        <label for="modal-sp-created-input">Fecha Solicitud:</label>
-                        <input type="date" id="modal-sp-created-input" class="fd-filter-input" style="width:100%; min-height:36px; padding:0.45rem 0.6rem; font-size:13px; border-radius:6px; border:1px solid #CBD5E1;">
+                        <label for="modal-sp-created-input">Fecha y Hora Solicitud:</label>
+                        <input type="datetime-local" id="modal-sp-created-input" class="fd-filter-input" style="width:100%; min-height:36px; padding:0.45rem 0.6rem; font-size:13px; border-radius:6px; border:1px solid #CBD5E1;">
                     </div>
 
                     <!-- 7. Fecha Propuesta -->
@@ -217,7 +217,7 @@
 </div>
 
 <!-- MODAL DE CONFIRMACIÓN DE ELIMINACIÓN DE TICKET (APP + SHAREPOINT) -->
-<div id="modal-delete-ticket-confirm" class="modal-backdrop" style="display:none; z-index:99999;">
+<div id="modal-delete-ticket-confirm" class="modal-backdrop" style="display:none; z-index:99999;" onclick="if(event.target===this) closeDeleteTicketConfirmModal()">
     <div style="background:#FFFFFF; border-radius:12px; max-width:480px; width:90%; padding:1.5rem; box-shadow:0 20px 25px -5px rgba(0,0,0,0.2), 0 10px 10px -5px rgba(0,0,0,0.1); border:1px solid #E2E8F0; margin:auto;">
         <div style="display:flex; align-items:flex-start; gap:0.9rem; margin-bottom:1rem;">
             <div style="width:42px; height:42px; border-radius:50%; background:#FEE2E2; color:#DC2626; display:flex; align-items:center; justify-content:center; flex-shrink:0;">

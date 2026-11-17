@@ -19,12 +19,20 @@
                 <!-- 2. EMPRESA -->
                 <div class="form-group">
                     <label for="create_company_name" style="font-weight:600; color:#1E293B;">Empresa: <span style="color:#DC2626;">*</span></label>
-                    <input type="text" name="company_name" id="create_company_name" list="create-companies-datalist" class="form-control" placeholder="Seleccione o escriba la empresa..." value="Kaizen Holdings" required>
-                    <datalist id="create-companies-datalist">
+                    <select name="company_name" id="create_company_name" class="form-control" required onchange="handleCreateCompanyChange(this)" style="font-size:13px; padding:0.5rem 0.75rem;">
+                        <option value="" disabled>-- Seleccione una Empresa --</option>
                         <?php foreach ($uniqueCompanies as $comp): ?>
-                            <option value="<?= htmlspecialchars($comp) ?>"><?= htmlspecialchars($comp) ?></option>
+                            <option value="<?= htmlspecialchars($comp) ?>" <?= ($comp === 'Kaizen Holdings') ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($comp) ?>
+                            </option>
                         <?php endforeach; ?>
-                    </datalist>
+                        <option value="__other__">+ Otra Empresa (Escribir nueva)...</option>
+                    </select>
+
+                    <div id="create_company_custom_container" style="display:none; margin-top:0.45rem;">
+                        <input type="text" name="company_name_custom" id="create_company_name_custom" class="form-control" placeholder="Escriba el nombre de la empresa..." style="font-size:13px; padding:0.45rem 0.65rem;">
+                        <small style="color:#64748B; font-size:11px;">Indique el nombre de la nueva empresa solicitante.</small>
+                    </div>
                 </div>
 
                 <!-- 3. ÁREA (IT / SSGG) -->
@@ -77,9 +85,9 @@
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
                 <!-- FECHA DE SOLICITUD -->
                 <div class="form-group">
-                    <label for="create_request_date" style="font-weight:600; color:#1E293B;">Fecha de Solicitud: <span style="color:#DC2626;">*</span></label>
-                    <input type="date" name="request_date" id="create_request_date" class="form-control" value="<?= date('Y-m-d') ?>" required style="padding:0.5rem 0.75rem;">
-                    <small style="color:#64748B; font-size:11px;">Por defecto la fecha del día.</small>
+                    <label for="create_request_date" style="font-weight:600; color:#1E293B;">Fecha y Hora de Solicitud: <span style="color:#DC2626;">*</span></label>
+                    <input type="datetime-local" name="request_date" id="create_request_date" class="form-control" value="<?= date('Y-m-d\TH:i') ?>" required style="padding:0.5rem 0.75rem;">
+                    <small style="color:#64748B; font-size:11px;">Fecha y hora de registro de la solicitud.</small>
                 </div>
 
                 <!-- FECHA PROPUESTA -->

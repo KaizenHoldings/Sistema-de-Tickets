@@ -21,10 +21,14 @@ class TicketController {
     public function createTicket(array $data, array $files, array $currentUser): array {
         try {
             $title = htmlspecialchars(trim($data['title'] ?? ''), ENT_QUOTES, 'UTF-8');
-            $companyName = htmlspecialchars(trim($data['company_name'] ?? 'Kaizen Holdings'), ENT_QUOTES, 'UTF-8');
-            if (empty($companyName)) {
-                $companyName = 'Kaizen Holdings';
+            $rawCompany = trim((string)($data['company_name'] ?? ''));
+            if ($rawCompany === '__other__' && !empty($data['company_name_custom'])) {
+                $rawCompany = trim((string)$data['company_name_custom']);
             }
+            if ($rawCompany === '' || $rawCompany === '__other__') {
+                $rawCompany = 'Kaizen Holdings';
+            }
+            $companyName = htmlspecialchars($rawCompany, ENT_QUOTES, 'UTF-8');
 
             // Área: IT o SSGG
             $areaCode = strtoupper(trim($data['area_code'] ?? ''));
@@ -148,12 +152,32 @@ class TicketController {
             $spId = null;
             $spNotice = '';
 
-            // Fechas de Solicitud y Propuesta (por defecto la fecha del día)
-            $rawReqDate = $data['request_date'] ?? null;
-            $requestDate = !empty($rawReqDate) ? date('Y-m-d H:i:s', strtotime($rawReqDate)) : date('Y-m-d H:i:s');
+            // Fechas de Solicitud y Propuesta (evitar fijar horas en 00:00:00)
+            $rawReqDate = trim((string)($data['request_date'] ?? ''));
+            if (empty($rawReqDate)) {
+                $requestDate = date('Y-m-d H:i:s');
+            } elseif (strlen($rawReqDate) <= 10) {
+                // Solo se envió fecha (YYYY-MM-DD): asignar hora actual del sistema en vez de medianoche (00:00:00)
+                $requestDate = date('Y-m-d', strtotime($rawReqDate)) . ' ' . date('H:i:s');
+            } else {
+                $requestDate = date('Y-m-d H:i:s', strtotime($rawReqDate));
+                if (str_ends_with($requestDate, '00:00:00')) {
+                    $requestDate = substr($requestDate, 0, 10) . ' ' . date('H:i:s');
+                }
+            }
 
-            $rawDueDate = $data['due_date'] ?? null;
-            $dueDate = !empty($rawDueDate) ? date('Y-m-d H:i:s', strtotime($rawDueDate)) : $requestDate;
+            $rawDueDate = trim((string)($data['due_date'] ?? ''));
+            if (empty($rawDueDate)) {
+                $dueDate = $requestDate;
+            } elseif (strlen($rawDueDate) <= 10) {
+                // Si solo se envió fecha, fijar a las 18:00:00 (final de jornada laboral) en vez de 00:00:00
+                $dueDate = date('Y-m-d', strtotime($rawDueDate)) . ' 18:00:00';
+            } else {
+                $dueDate = date('Y-m-d H:i:s', strtotime($rawDueDate));
+                if (str_ends_with($dueDate, '00:00:00')) {
+                    $dueDate = substr($dueDate, 0, 10) . ' 18:00:00';
+                }
+            }
 
             // OPCIÓN DE CREACIÓN DIRECTA EN SHAREPOINT (PRODUCCIÓN / LOCAL)
             if ($syncSharePoint) {
@@ -786,7 +810,21 @@ class TicketController {
 
             // 7. Fecha de Solicitud (field_6)
             if (isset($data['request_date']) && trim($data['request_date']) !== '') {
-                $reqDate = date('Y-m-d H:i:s', strtotime($data['request_date']));
+                $rawReq = trim($data['request_date']);
+                if (strlen($rawReq) <= 10) {
+                    $originalTime = !empty($ticket['created_at']) ? date('H:i:s', strtotime($ticket['created_at'])) : date('H:i:s');
+                    if ($originalTime === '00:00:00') {
+                        $originalTime = date('H:i:s');
+                    }
+                    $reqDate = date('Y-m-d', strtotime($rawReq)) . ' ' . $originalTime;
+                } else {
+                    $reqDate = date('Y-m-d H:i:s', strtotime($rawReq));
+                    if (str_ends_with($reqDate, '00:00:00')) {
+                        $originalTime = !empty($ticket['created_at']) ? date('H:i:s', strtotime($ticket['created_at'])) : date('H:i:s');
+                        if ($originalTime === '00:00:00') $originalTime = date('H:i:s');
+                        $reqDate = substr($reqDate, 0, 10) . ' ' . $originalTime;
+                    }
+                }
                 $spPayload['request_date'] = $reqDate;
                 $dbUpdates[] = "created_at = :created_at";
                 $dbParams[':created_at'] = $reqDate;
@@ -794,7 +832,19 @@ class TicketController {
 
             // 8. Fecha Propuesta (field_7)
             if (isset($data['due_date'])) {
-                $dueDate = trim($data['due_date']) !== '' ? date('Y-m-d H:i:s', strtotime($data['due_date'])) : null;
+                $rawDue = trim($data['due_date']);
+                if ($rawDue !== '') {
+                    if (strlen($rawDue) <= 10) {
+                        $dueDate = date('Y-m-d', strtotime($rawDue)) . ' 18:00:00';
+                    } else {
+                        $dueDate = date('Y-m-d H:i:s', strtotime($rawDue));
+                        if (str_ends_with($dueDate, '00:00:00')) {
+                            $dueDate = substr($dueDate, 0, 10) . ' 18:00:00';
+                        }
+                    }
+                } else {
+                    $dueDate = null;
+                }
                 $spPayload['due_date'] = $dueDate;
                 $dbUpdates[] = "due_date = :due_date";
                 $dbParams[':due_date'] = $dueDate;

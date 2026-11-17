@@ -460,6 +460,26 @@ function initCsatFormSubmit() {
     });
 }
 
+function handleCreateCompanyChange(selectEl) {
+    const customContainer = document.getElementById('create_company_custom_container');
+    const customInput = document.getElementById('create_company_name_custom');
+    if (!customContainer) return;
+    if (selectEl && selectEl.value === '__other__') {
+        customContainer.style.display = 'block';
+        if (customInput) {
+            customInput.required = true;
+            customInput.focus();
+        }
+    } else {
+        customContainer.style.display = 'none';
+        if (customInput) {
+            customInput.required = false;
+            customInput.value = '';
+        }
+    }
+}
+window.handleCreateCompanyChange = handleCreateCompanyChange;
+
 function initNewTicketForm() {
     const form = document.getElementById('create-ticket-form');
     if (!form) return;
@@ -487,7 +507,23 @@ function initNewTicketForm() {
             }
         };
 
+        const compSelect = document.getElementById('create_company_name');
+        const customCompInput = document.getElementById('create_company_name_custom');
+        let selectedCompany = compSelect ? compSelect.value.trim() : '';
+        if (selectedCompany === '__other__') {
+            selectedCompany = customCompInput ? customCompInput.value.trim() : '';
+            if (!selectedCompany) {
+                showToast('Por favor ingrese el nombre de la empresa personalizada.', 'warning');
+                if (customCompInput) customCompInput.focus();
+                restoreSubmitBtn();
+                return;
+            }
+        }
+
         const formData = new FormData(form);
+        if (selectedCompany) {
+            formData.set('company_name', selectedCompany);
+        }
         const syncCheckbox = document.getElementById('create-sync-sharepoint');
         if (syncCheckbox) {
             formData.set('sync_sharepoint', syncCheckbox.checked ? '1' : '0');
@@ -507,6 +543,12 @@ function initNewTicketForm() {
             if (result.success) {
                 showToast(result.message, result.warning ? 'warning' : 'success');
                 form.reset();
+                const customContainer = document.getElementById('create_company_custom_container');
+                if (customContainer) customContainer.style.display = 'none';
+                if (customCompInput) {
+                    customCompInput.value = '';
+                    customCompInput.required = false;
+                }
                 setTimeout(() => {
                     const activeContent = document.querySelector('.tab-content.active');
                     const tab = activeContent ? activeContent.id : 'tickets-tab';
@@ -1229,10 +1271,14 @@ async function openTicketModal(ticketId) {
                 dueDateEl.textContent = ticket.due_date ? ticket.due_date.substring(0, 16) : '—';
             }
 
-            // Inputs editables de fechas en propiedades de modal
+            // Inputs editables de fechas en propiedades de modal (formato YYYY-MM-DDTHH:MM para datetime-local)
             const createdInput = document.getElementById('modal-sp-created-input');
             if (createdInput) {
-                createdInput.value = ticket.created_at ? ticket.created_at.substring(0, 10) : '';
+                if (ticket.created_at) {
+                    createdInput.value = ticket.created_at.replace(' ', 'T').substring(0, 16);
+                } else {
+                    createdInput.value = '';
+                }
             }
             const dueInput = document.getElementById('modal-sp-due-input');
             if (dueInput) {
@@ -2162,6 +2208,7 @@ function openDeleteTicketConfirmModal(ticketId, ticketCode, sharepointId, ticket
         }
 
         modal.style.display = 'flex';
+        modal.classList.add('active');
         return;
     }
 
@@ -2184,7 +2231,10 @@ function openDeleteTicketConfirmModal(ticketId, ticketCode, sharepointId, ticket
  */
 function closeDeleteTicketConfirmModal() {
     const modal = document.getElementById('modal-delete-ticket-confirm');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+        modal.style.display = 'none';
+        modal.classList.remove('active');
+    }
     pendingDeleteTicketData = null;
 }
 
