@@ -1548,11 +1548,24 @@ async function submitComment(isInternal = false) {
     }
 }
 
+// Limpia el formulario de nueva solicitud cuando su modal se cierra
+// por cualquier via (boton, X, clic en el fondo o tecla Escape).
+function resetCreateTicketFormIfPresent() {
+    if (typeof window.resetCreateTicketForm !== 'function') return;
+
+    // No tocar el formulario si hay un guardado en curso.
+    const submitBtn = document.getElementById('btn-submit-create-ticket');
+    if (submitBtn && submitBtn.disabled) return;
+
+    window.resetCreateTicketForm();
+}
+
 function initAssignModal() {
     document.querySelectorAll('.close-modal, .close-assign-modal').forEach(btn => {
         btn.addEventListener('click', () => {
             if (pendingStatusChange) cancelStatusChange();
             document.querySelectorAll('.modal-backdrop').forEach(m => m.style.display = 'none');
+            resetCreateTicketFormIfPresent();
         });
     });
 
@@ -1561,6 +1574,7 @@ function initAssignModal() {
             if (e.target === backdrop) {
                 if (pendingStatusChange) cancelStatusChange();
                 backdrop.style.display = 'none';
+                if (backdrop.id === 'create-ticket-modal') resetCreateTicketFormIfPresent();
             }
         });
     });
@@ -1569,6 +1583,7 @@ function initAssignModal() {
         if (e.key === 'Escape') {
             if (pendingStatusChange) cancelStatusChange();
             document.querySelectorAll('.modal-backdrop').forEach(m => m.style.display = 'none');
+            resetCreateTicketFormIfPresent();
             toggleNotificationsDropdown(false);
         } else if (e.key === '/' && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
             e.preventDefault();

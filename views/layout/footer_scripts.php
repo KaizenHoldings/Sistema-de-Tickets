@@ -338,9 +338,32 @@
         }
     }
 
-    function openCreateTicketModal() {
+    // Devuelve el formulario de nueva solicitud a su estado inicial:
+    // limpia asunto, estatus, prioridad, observaciones, adjunto, etc.
+    // Se invoca al cerrar Y al abrir, para cubrir tambien los cierres
+    // por tecla Escape o por clic en el fondo del modal (ver kanban.js).
+    function resetCreateTicketForm() {
+        const form = document.getElementById('create-ticket-form');
+        if (form) form.reset();
+
+        // Campo de empresa personalizada (no forma parte del reset nativo)
+        const customContainer = document.getElementById('create_company_custom_container');
+        const customInput = document.getElementById('create_company_name_custom');
+        if (customContainer) customContainer.style.display = 'none';
+        if (customInput) {
+            customInput.value = '';
+            customInput.required = false;
+        }
+        const compSelect = document.getElementById('create_company_name');
+        if (compSelect && compSelect.value === '__other__') {
+            compSelect.value = 'Kaizen Holdings';
+        }
+
+        // Sincronizacion con SharePoint activada por defecto
         const chk = document.getElementById('create-sync-sharepoint');
         if (chk) chk.checked = true;
+
+        // Boton de guardar habilitado (si quedo en estado "Guardando...")
         const submitBtn = document.getElementById('btn-submit-create-ticket');
         if (submitBtn) {
             submitBtn.disabled = false;
@@ -348,6 +371,8 @@
             submitBtn.style.cursor = 'pointer';
             submitBtn.innerHTML = 'Guardar Solicitud';
         }
+
+        // Fechas recalculadas al momento actual
         const now = new Date();
         const pad = n => String(n).padStart(2, '0');
         const localDateTime = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
@@ -356,32 +381,18 @@
         const reqDateInput = document.getElementById('create_request_date');
         if (reqDateInput) reqDateInput.value = localDateTime;
         const dueDateInput = document.getElementById('create_due_date');
-        if (dueDateInput && !dueDateInput.value) dueDateInput.value = todayDate;
+        if (dueDateInput) dueDateInput.value = todayDate;
+    }
+    window.resetCreateTicketForm = resetCreateTicketForm;
 
-        const customContainer = document.getElementById('create_company_custom_container');
-        const customInput = document.getElementById('create_company_name_custom');
-        const compSelect = document.getElementById('create_company_name');
-        if (customContainer) customContainer.style.display = 'none';
-        if (customInput) {
-            customInput.value = '';
-            customInput.required = false;
-        }
-        if (compSelect && compSelect.value === '__other__') {
-            compSelect.value = 'Kaizen Holdings';
-        }
-
+    function openCreateTicketModal() {
+        resetCreateTicketForm();
         document.getElementById('create-ticket-modal').style.display = 'flex';
     }
 
     function closeCreateTicketModal() {
-        const customContainer = document.getElementById('create_company_custom_container');
-        const customInput = document.getElementById('create_company_name_custom');
-        if (customContainer) customContainer.style.display = 'none';
-        if (customInput) {
-            customInput.value = '';
-            customInput.required = false;
-        }
         document.getElementById('create-ticket-modal').style.display = 'none';
+        resetCreateTicketForm();
     }
 
     function openCreateUserModal() {
