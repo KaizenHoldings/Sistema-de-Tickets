@@ -372,6 +372,23 @@
             submitBtn.innerHTML = 'Guardar Solicitud';
         }
 
+        // Token unico de ESTE envio: identifica el intento de creacion para que
+        // un reintento (doble clic, red lenta, recarga) no genere otro ticket.
+        const tokenInput = document.getElementById('create_creation_token');
+        if (tokenInput) {
+            let token;
+            if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+                token = window.crypto.randomUUID();
+            } else if (window.crypto && window.crypto.getRandomValues) {
+                const b = new Uint8Array(16);
+                window.crypto.getRandomValues(b);
+                token = Array.from(b, x => x.toString(16).padStart(2, '0')).join('');
+            } else {
+                token = Date.now().toString(16) + Math.random().toString(16).slice(2);
+            }
+            tokenInput.value = token;
+        }
+
         // Fechas recalculadas al momento actual
         const now = new Date();
         const pad = n => String(n).padStart(2, '0');
@@ -885,6 +902,7 @@
             const rowArea = r.dataset.areaName || '';
             const rowResp = r.dataset.responsable || r.dataset.agentName || '';
             const rowObs = r.dataset.observations || '';
+            const rowSolicitante = r.dataset.solicitante || '';
             const rowStatus = r.dataset.spStatus || r.dataset.statusName || '';
             const rowStatusId = parseInt(r.dataset.statusId || '1');
             const rowPriority = r.dataset.priority || '';
@@ -910,12 +928,13 @@
                 if (rowPriority !== targetPrio) match = false;
             }
 
-            // Filtro 1: Buscador Global (Código, Asunto u Observaciones)
+            // Filtro 1: Buscador Global (Código, Asunto, Observaciones o Solicitante)
             if (match && query) {
                 const matchCode = rowCode.includes(query);
                 const matchTitle = rowTitle.includes(query);
                 const matchObs = rowObs.includes(query);
-                if (!matchCode && !matchTitle && !matchObs) match = false;
+                const matchSolicitante = rowSolicitante.includes(query);
+                if (!matchCode && !matchTitle && !matchObs && !matchSolicitante) match = false;
             }
 
             // Filtro 2: Empresa

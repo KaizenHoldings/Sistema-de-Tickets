@@ -30,6 +30,13 @@ class TicketController {
             }
             $companyName = htmlspecialchars($rawCompany, ENT_QUOTES, 'UTF-8');
 
+            // Solicitante: persona que pidio el servicio (texto libre, independiente
+            // del usuario autenticado que registra la solicitud en el sistema).
+            $requestedBy = htmlspecialchars(trim((string)($data['requested_by'] ?? '')), ENT_QUOTES, 'UTF-8');
+            if ($requestedBy === '') {
+                $requestedBy = null;
+            }
+
             // Área: IT o SSGG
             $areaCode = strtoupper(trim($data['area_code'] ?? ''));
             $areaId = (int)($data['area_id'] ?? 0);
@@ -96,6 +103,37 @@ class TicketController {
 
             // PROCESAMIENTO SEGURO DE ARCHIVOS (ANTI-MALWARE & OWASP AUDIT)
             $attachmentPath = null;
+
+            // Un fallo de subida NO puede pasar desapercibido: si se ignora, el
+            // ticket se crea sin la evidencia y el usuario cree haberla adjuntado.
+            // Se corta aqui, antes de crear nada en SharePoint ni en la base.
+            if (isset($files['attachment'])) {
+                $uploadError = $files['attachment']['error'] ?? UPLOAD_ERR_NO_FILE;
+
+                if ($uploadError !== UPLOAD_ERR_OK && $uploadError !== UPLOAD_ERR_NO_FILE) {
+                    $motivo = match ($uploadError) {
+                        UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE =>
+                            'el archivo supera el tamaño máximo admitido por el servidor',
+                        UPLOAD_ERR_PARTIAL =>
+                            'la carga se interrumpió y el archivo llegó incompleto',
+                        UPLOAD_ERR_NO_TMP_DIR =>
+                            'el servidor no tiene carpeta temporal disponible',
+                        UPLOAD_ERR_CANT_WRITE =>
+                            'el servidor no pudo escribir el archivo en disco',
+                        UPLOAD_ERR_EXTENSION =>
+                            'una extensión del servidor bloqueó la carga',
+                        default =>
+                            'ocurrió un error desconocido durante la carga',
+                    };
+
+                    return [
+                        'success' => false,
+                        'message' => "No se pudo adjuntar la evidencia: {$motivo}. "
+                            . "El ticket NO se creó; corrija el archivo e inténtelo de nuevo.",
+                    ];
+                }
+            }
+
             if (isset($files['attachment']) && $files['attachment']['error'] === UPLOAD_ERR_OK) {
                 $file = $files['attachment'];
                 
@@ -133,12 +171,67 @@ class TicketController {
                 $randomName = 'ticket_' . date('Ymd_His') . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
                 $destination = $uploadDir . $randomName;
 
+                if (!is_dir($uploadDir) || !is_writable($uploadDir)) {
+                    return [
+                        'success' => false,
+                        'message' => 'No se pudo adjuntar la evidencia: la carpeta de subidas no existe '
+                            . 'o no tiene permisos de escritura. El ticket NO se creó.',
+                    ];
+                }
+
                 if (move_uploaded_file($file['tmp_name'], $destination)) {
                     $attachmentPath = 'uploads/' . $randomName;
+                } else {
+                    // Si no se puede guardar el archivo, no se crea un ticket que
+                    // afirme tener evidencia: se informa y se deja reintentar.
+                    return [
+                        'success' => false,
+                        'message' => 'No se pudo guardar la evidencia en el servidor. '
+                            . 'El ticket NO se creó; inténtelo de nuevo.',
+                    ];
                 }
             }
 
             $year = date('Y');
+
+            // ===========================================================
+            // PROTECCIÓN ANTI-DUPLICADOS (IDEMPOTENCIA)
+            //
+            // El formulario envía un token único por cada apertura del modal.
+            // Si la misma petición llega dos veces —doble clic, reintento por
+            // red, recarga tras una respuesta lenta— se devuelve el ticket ya
+            // creado en vez de crear otro.
+            //
+            // Esta comprobación va ANTES de crear en SharePoint: es lo que
+            // evita que un reintento genere un segundo registro allí.
+            // ===========================================================
+            $creationToken = trim((string)($data['creation_token'] ?? ''));
+            if ($creationToken !== '' && strlen($creationToken) <= 64) {
+                $stmtDup = $this->db->prepare("
+                    SELECT id, code, sharepoint_id
+                    FROM tickets
+                    WHERE creation_token = :token
+                    LIMIT 1
+                ");
+                $stmtDup->execute([':token' => $creationToken]);
+                $yaExiste = $stmtDup->fetch();
+
+                if ($yaExiste) {
+                    return [
+                        'success'       => true,
+                        'duplicate'     => true,
+                        'message'       => "Esta solicitud ya había sido registrada como {$yaExiste['code']}. No se creó por duplicado.",
+                        'ticket_id'     => (int)$yaExiste['id'],
+                        'sharepoint_id' => $yaExiste['sharepoint_id'] !== null ? (int)$yaExiste['sharepoint_id'] : null,
+                        'code'          => $yaExiste['code'],
+                    ];
+                }
+            } else {
+                // Sin token (peticiones antiguas o externas) se genera uno para
+                // dejar constancia, aunque no protege de un reintento previo.
+                $creationToken = bin2hex(random_bytes(16));
+            }
+
             // Por defecto SIEMPRE guardar y sincronizar con SharePoint a menos que se desactive explícitamente (0 o 'false')
             $syncSharePoint = true;
             if (isset($data['sync_sharepoint'])) {
@@ -188,6 +281,7 @@ class TicketController {
                         'company_name' => $companyName,
                         'area_code'    => $areaCode,
                         'responsable'  => $responsable ?: '',
+                        'requested_by' => $requestedBy ?: '',
                         'observations' => $observations,
                         'sp_status'    => $spStatus,
                         'request_date' => $requestDate,
@@ -198,6 +292,10 @@ class TicketController {
                     if ($spResult['success'] && !empty($spResult['item_id'])) {
                         $spId = (int)$spResult['item_id'];
                         $spNotice = " y sincronizado en SharePoint (#{$spId})";
+                        $spWarn = $spService->consumeLastWarning();
+                        if ($spWarn !== '') {
+                            $spNotice .= " (Aviso: {$spWarn})";
+                        }
                     } else {
                         $spNotice = " (Aviso SharePoint: " . ($spResult['message'] ?? 'No se pudo crear en SharePoint') . ")";
                     }
@@ -210,20 +308,37 @@ class TicketController {
             if ($spId !== null && $spId > 0) {
                 $code = sprintf("%s-SP-%05d", $prefix, $spId);
             } else {
-                $stmtCount = $this->db->prepare("SELECT COUNT(*) as total FROM tickets WHERE area_id = :area_id");
-                $stmtCount->execute([':area_id' => $areaId]);
-                $count = (int)$stmtCount->fetch()['total'] + 1;
-                $code = sprintf("%s-%s-%03d", $prefix, $year, $count);
+                // El correlativo se calcula desde el MAYOR ya emitido con este
+                // prefijo y año, no desde COUNT(*): contar es frágil porque al
+                // borrar un ticket el contador retrocede y reutiliza un código
+                // existente, que la restricción UNIQUE de 'code' rechazaría.
+                $stmtMax = $this->db->prepare("
+                    SELECT MAX(CAST(SUBSTRING_INDEX(code, '-', -1) AS UNSIGNED)) AS maximo
+                    FROM tickets
+                    WHERE code LIKE :patron
+                ");
+                $patron = "{$prefix}-{$year}-%";
+                $stmtMax->execute([':patron' => $patron]);
+                $maximo = (int)($stmtMax->fetch()['maximo'] ?? 0);
+
+                $stmtLibre = $this->db->prepare("SELECT 1 FROM tickets WHERE code = :code LIMIT 1");
+                $intento = 0;
+                do {
+                    $maximo++;
+                    $intento++;
+                    $code = sprintf("%s-%s-%03d", $prefix, $year, $maximo);
+                    $stmtLibre->execute([':code' => $code]);
+                } while ($stmtLibre->fetch() && $intento < 100);
             }
 
             $stmt = $this->db->prepare("
                 INSERT INTO tickets (
-                    sharepoint_id, code, title, company_name, area_code, 
+                    sharepoint_id, code, creation_token, title, company_name, requested_by, area_code, 
                     responsable, observations, sp_status, description, priority, 
                     status_id, area_id, requester_id, assigned_agent_id, 
                     due_date, created_at, attachment_path
                 ) VALUES (
-                    :sharepoint_id, :code, :title, :company_name, :area_code, 
+                    :sharepoint_id, :code, :creation_token, :title, :company_name, :requested_by, :area_code, 
                     :responsable, :observations, :sp_status, :description, :priority, 
                     :status_id, :area_id, :requester_id, :assigned_agent_id, 
                     :due_date, :created_at, :attachment_path
@@ -233,8 +348,10 @@ class TicketController {
             $stmt->execute([
                 ':sharepoint_id'      => $spId,
                 ':code'               => $code,
+                ':creation_token'     => $creationToken,
                 ':title'              => $title,
                 ':company_name'       => $companyName,
+                ':requested_by'       => $requestedBy,
                 ':area_code'          => $areaCode,
                 ':responsable'         => $responsable,
                 ':observations'       => $observations,
@@ -250,7 +367,9 @@ class TicketController {
                 ':attachment_path'    => $attachmentPath
             ]);
 
-            $ticketId = $this->db->lastInsertId();
+            // lastInsertId() devuelve cadena; se normaliza a entero para que la
+            // respuesta tenga el mismo tipo que la del camino anti-duplicados.
+            $ticketId = (int)$this->db->lastInsertId();
             $hasSpWarning = ($syncSharePoint && empty($spId));
 
             return [
@@ -391,6 +510,7 @@ class TicketController {
 
             $sql = "
                 SELECT t.id, t.code, t.title, t.description, t.priority, t.created_at, t.attachment_path, t.area_id,
+                       t.company_name, t.requested_by, t.sp_created_by,
                        u_req.name as requester_name, u_req.email as requester_email,
                        a.name as area_name
                 FROM tickets t
@@ -429,7 +549,7 @@ class TicketController {
      */
     public function assignAgent(int $ticketId, int $agentId, array $currentUser): array {
         try {
-            $stmtTicket = $this->db->prepare("SELECT id, code, area_id, status_id FROM tickets WHERE id = :ticket_id");
+            $stmtTicket = $this->db->prepare("SELECT id, code, area_id, status_id, sharepoint_id, responsable FROM tickets WHERE id = :ticket_id");
             $stmtTicket->execute([':ticket_id' => $ticketId]);
             $ticket = $stmtTicket->fetch();
 
@@ -452,7 +572,7 @@ class TicketController {
                 }
             }
 
-            $stmtAgent = $this->db->prepare("SELECT id, name, area_id FROM users WHERE id = :agent_id AND is_active = 1");
+            $stmtAgent = $this->db->prepare("SELECT id, name, alias, area_id FROM users WHERE id = :agent_id AND is_active = 1");
             $stmtAgent->execute([':agent_id' => $agentId]);
             $agent = $stmtAgent->fetch();
 
@@ -466,18 +586,75 @@ class TicketController {
 
             $this->db->beginTransaction();
 
+            // 'responsable' es el campo que muestran la tabla, el modal y la vista
+            // de pendientes. Si solo se guarda assigned_agent_id, el ticket queda
+            // asignado en la base pero se sigue viendo como "Sin Asignar".
+            //
+            // Se usa el ALIAS porque esa es la convención de la lista de SharePoint,
+            // donde el responsable se registra con iniciales (JT, JD, OC...). El mismo
+            // valor se guarda en local y se envía a SharePoint: si difirieran, la
+            // siguiente sincronización cambiaría lo que ve el usuario.
+            $agentDisplayName = trim((string)($agent['alias'] ?? ''));
+            if ($agentDisplayName === '') {
+                $agentDisplayName = trim((string)$agent['name']);
+            }
+
             $stmtUpdate = $this->db->prepare("
                 UPDATE tickets 
                 SET assigned_agent_id = :agent_id,
+                    responsable = :responsable,
                     status_id = CASE WHEN status_id = 1 THEN 2 ELSE status_id END,
                     updated_at = NOW()
                 WHERE id = :ticket_id
             ");
-            $stmtUpdate->execute([':agent_id' => $agentId, ':ticket_id' => $ticketId]);
+            $stmtUpdate->execute([
+                ':agent_id'    => $agentId,
+                ':responsable' => $agentDisplayName,
+                ':ticket_id'   => $ticketId,
+            ]);
 
             $this->db->commit();
 
-            return ['success' => true, 'message' => "Ticket {$ticket['code']} asignado exitosamente a {$agent['name']}."];
+            // SINCRONIZAR LA ASIGNACIÓN CON SHAREPOINT (columna "Responsable" / field_2)
+            //
+            // Se hace DESPUÉS de confirmar la transacción local, a propósito: si
+            // SharePoint falla, la asignación en el sistema se mantiene y sólo se
+            // informa del aviso, en lugar de perder el trabajo del usuario.
+            $spNotice = '';
+            $spWarning = false;
+            $spId = (int)($ticket['sharepoint_id'] ?? 0);
+
+            if ($spId > 0) {
+                try {
+                    $spService = new \Services\SharePointService();
+                    $spResult = $spService->updateSharePointItem($spId, [
+                        'responsable' => $agentDisplayName,
+                    ]);
+
+                    if (!empty($spResult['success'])) {
+                        $spNotice = !empty($spResult['dry_run'])
+                            ? ' (Modo seguro: no se escribió en SharePoint)'
+                            : " y sincronizado en SharePoint (#{$spId})";
+                    } else {
+                        $spWarning = true;
+                        $spNotice = ' (Aviso: la asignación se guardó en el sistema pero no pudo reflejarse en SharePoint: '
+                            . ($spResult['message'] ?? 'error desconocido') . ')';
+                    }
+                } catch (\Throwable $t) {
+                    $spWarning = true;
+                    $spNotice = ' (Aviso: la asignación se guardó en el sistema pero no pudo reflejarse en SharePoint: '
+                        . $t->getMessage() . ')';
+                }
+            }
+
+            return [
+                'success'     => true,
+                'warning'     => $spWarning,
+                'message'     => "Ticket {$ticket['code']} asignado exitosamente a {$agent['name']}{$spNotice}.",
+                'agent_id'    => $agentId,
+                'agent_name'  => $agentDisplayName,
+                'responsable' => $agentDisplayName,
+            ];
 
         } catch (Exception $e) {
             if ($this->db->inTransaction()) $this->db->rollBack();
@@ -495,7 +672,7 @@ class TicketController {
             $userAreaId = (int)($currentUser['area_id'] ?? 0);
 
             $sql = "
-                SELECT t.id, t.sharepoint_id, t.code, t.title, t.company_name, t.area_code, t.responsable, t.observations, t.sp_status,
+                SELECT t.id, t.sharepoint_id, t.code, t.title, t.company_name, t.requested_by, t.sp_created_by, t.sp_created_by_email, t.area_code, t.responsable, t.observations, t.sp_status,
                        t.description, t.priority, t.status_id, t.area_id, t.created_at, t.due_date, t.resolved_at,
                        ks.name as status_name, ks.slug as status_slug,
                        a.name as area_name,
@@ -603,7 +780,7 @@ class TicketController {
         try {
             $stmt = $this->db->prepare("
                 SELECT t.id, t.code, t.title, t.description, t.priority, t.status_id, t.area_id, t.created_at,
-                       t.company_name, t.responsable, t.sp_status, t.due_date, t.sharepoint_id,
+                       t.company_name, t.requested_by, t.sp_created_by, t.responsable, t.sp_status, t.due_date, t.sharepoint_id,
                        ks.name as status_name, ks.slug as status_slug,
                        a.name as area_name,
                        u_ag.name as agent_name,
@@ -643,7 +820,7 @@ class TicketController {
 
             $stmt = $this->db->prepare("
                 SELECT t.id, t.code, t.title, t.description, t.priority, t.status_id, t.area_id, t.created_at,
-                       t.company_name, t.responsable, t.sp_status, t.due_date, t.sharepoint_id,
+                       t.company_name, t.requested_by, t.sp_created_by, t.responsable, t.sp_status, t.due_date, t.sharepoint_id,
                        ks.name as status_name, ks.slug as status_slug,
                        a.name as area_name,
                        u_req.name as requester_name, u_req.email as requester_email,
@@ -703,6 +880,11 @@ class TicketController {
             }
 
             // Preparar payload para SharePoint
+            $spService = new \Services\SharePointService();
+            // Cadena vacia = la columna del solicitante no esta mapeada en el .env,
+            // por lo que ese dato no viaja a SharePoint.
+            $spRequestedByMapped = ($spService->getRequestedByField() !== '');
+
             $spPayload = [];
             $dbUpdates = [];
             $dbParams = [':id' => $ticketId];
@@ -754,6 +936,16 @@ class TicketController {
                         $dbParams[':agent_id'] = (int)$agentUser['id'];
                     }
                 }
+            }
+
+            // 4.1 Solicitante (solo sistema local: no se escribe en SharePoint)
+            if (array_key_exists('requested_by', $data)) {
+                $newRequestedBy = trim((string)$data['requested_by']);
+                if ($spRequestedByMapped) {
+                    $spPayload['requested_by'] = $newRequestedBy;
+                }
+                $dbUpdates[] = "requested_by = :requested_by";
+                $dbParams[':requested_by'] = ($newRequestedBy !== '') ? $newRequestedBy : null;
             }
 
             // 5. Observaciones
@@ -825,6 +1017,16 @@ class TicketController {
                         $reqDate = substr($reqDate, 0, 10) . ' ' . $originalTime;
                     }
                 }
+                // El input del modal es datetime-local (sin segundos). Si el usuario no
+                // toco la fecha/hora, conservar el valor original completo en lugar de
+                // truncar los segundos a :00 en cada guardado.
+                if (!empty($ticket['created_at'])) {
+                    $storedReq = date('Y-m-d H:i:s', strtotime($ticket['created_at']));
+                    if (substr($storedReq, 0, 16) === substr($reqDate, 0, 16)) {
+                        $reqDate = $storedReq;
+                    }
+                }
+
                 $spPayload['request_date'] = $reqDate;
                 $dbUpdates[] = "created_at = :created_at";
                 $dbParams[':created_at'] = $reqDate;
@@ -855,7 +1057,6 @@ class TicketController {
             }
 
             // ACTUALIZACIÓN EN SHAREPOINT MEDIANTE GRAPH API
-            $spService = new \Services\SharePointService();
             $spResult = $spService->updateSharePointItem($spId, $spPayload);
 
             if (!$spResult['success']) {
@@ -885,6 +1086,7 @@ class TicketController {
                         'company_name' => $ticket['company_name'],
                         'area_code' => $ticket['area_code'],
                         'responsable' => $ticket['responsable'],
+                        'requested_by' => $ticket['requested_by'] ?? null,
                         'observations' => $ticket['observations'],
                         'sp_status' => $ticket['sp_status']
                     ], JSON_UNESCAPED_UNICODE),
@@ -907,9 +1109,16 @@ class TicketController {
             $stmtRefetch->execute([':id' => $ticketId]);
             $updatedTicket = $stmtRefetch->fetch();
 
+            $spWarning = $spService->consumeLastWarning();
+            $okMessage = 'Registro actualizado exitosamente en SharePoint y sincronizado en el sistema.';
+            if ($spWarning !== '') {
+                $okMessage .= ' Aviso: ' . $spWarning;
+            }
+
             return [
                 'success' => true,
-                'message' => 'Registro actualizado exitosamente en SharePoint y sincronizado en el sistema.',
+                'warning' => ($spWarning !== ''),
+                'message' => $okMessage,
                 'ticket'  => $updatedTicket
             ];
         } catch (\Throwable $e) {

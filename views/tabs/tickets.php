@@ -234,6 +234,7 @@
                                 <tr>
                                     <th style="min-width: 240px;">Solicitud</th>
                                     <th style="min-width: 130px;">Empresa</th>
+                                    <th style="min-width: 140px;">Solicitante</th>
                                     <th style="min-width: 90px;">Área</th>
                                     <th style="min-width: 130px;">Responsable</th>
                                     <th style="min-width: 200px;">Observaciones</th>
@@ -247,7 +248,7 @@
                         <tbody id="all-tickets-tbody">
                             <?php if (empty($allTickets)): ?>
                                 <tr id="all-tickets-no-data">
-                                    <td colspan="10" style="text-align:center; padding:2rem; color:var(--fd-text-dim);">
+                                    <td colspan="11" style="text-align:center; padding:2rem; color:var(--fd-text-dim);">
                                         No hay tickets registrados en esta vista.
                                     </td>
                                 </tr>
@@ -265,7 +266,14 @@
                                              ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>' 
                                              : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
 
-                                        $responsable = !empty($t['responsable']) ? $t['responsable'] : (!empty($t['agent_name']) ? $t['agent_name'] : '');
+                                        // Quien pidio la solicitud. Prioridad:
+                                        //  1) lo escrito en la app, 2) quien la cargo en SharePoint
+                                        $solicitanteManual = trim($t['requested_by'] ?? '');
+                                        $solicitanteSp     = trim($t['sp_created_by'] ?? '');
+                                        $solicitante       = $solicitanteManual !== '' ? $solicitanteManual : $solicitanteSp;
+                                        $solicitanteEsDeSp = ($solicitanteManual === '' && $solicitanteSp !== '');
+                                        $solicitanteMail   = trim($t['sp_created_by_email'] ?? '');
+                                        $responsable = responsableVisible($t);
                                         $observations = trim($t['observations'] ?? '');
 
                                         $spStatus = !empty($t['sp_status']) ? $t['sp_status'] : ($t['status_name'] ?? 'Pendiente');
@@ -284,7 +292,8 @@
                                         data-area-id="<?= (int)($t['area_id'] ?? 0) ?>" 
                                         data-area-name="<?= htmlspecialchars(strtolower($areaCode), ENT_QUOTES, 'UTF-8') ?>" 
                                         data-responsable="<?= htmlspecialchars(strtolower($responsable ?: 'sin asignar'), ENT_QUOTES, 'UTF-8') ?>" 
-                                        data-observations="<?= htmlspecialchars(strtolower($observations), ENT_QUOTES, 'UTF-8') ?>" 
+                                        data-observations="<?= htmlspecialchars(strtolower($observations), ENT_QUOTES, 'UTF-8') ?>"
+                                        data-solicitante="<?= htmlspecialchars(strtolower($solicitante), ENT_QUOTES, 'UTF-8') ?>" 
                                         data-sp-status="<?= htmlspecialchars(strtolower($spStatus), ENT_QUOTES, 'UTF-8') ?>" 
                                         data-priority="<?= htmlspecialchars(strtolower($t['priority'] ?? 'medium')) ?>" 
                                         data-status-id="<?= (int)$t['status_id'] ?>" 
@@ -311,6 +320,16 @@
                                             <div style="font-weight:600; color:#1E293B; font-size:13px;">
                                                 <?= htmlspecialchars($company) ?>
                                             </div>
+                                        </td>
+                                        <!-- 2.1 Solicitante -->
+                                        <td>
+                                            <?php if ($solicitante !== ''): ?>
+                                                <span style="font-size:12px; color:#334155;" title="<?= htmlspecialchars($solicitanteMail !== '' ? $solicitanteMail : $solicitante) ?><?= $solicitanteEsDeSp ? ' · cargó la solicitud en SharePoint' : '' ?>">
+                                                    <?= htmlspecialchars($solicitante) ?>
+                                                </span>
+                                            <?php else: ?>
+                                                <span style="color:#CBD5E1;">&mdash;</span>
+                                            <?php endif; ?>
                                         </td>
                                         <!-- 3. Área -->
                                         <td>
@@ -445,7 +464,7 @@
                                                  data-status-name="<?= htmlspecialchars(strtolower($ticket['status_name'] ?? $ticket['sp_status'] ?? '')) ?>" 
                                                  data-area-id="<?= (int)($ticket['area_id'] ?? 0) ?>" 
                                                  data-agent-id="<?= (int)($ticket['assigned_agent_id'] ?? 0) ?>" 
-                                                 data-responsable="<?= htmlspecialchars(strtolower($ticket['responsable'] ?? $ticket['agent_name'] ?? 'sin asignar')) ?>" 
+                                                 data-responsable="<?= htmlspecialchars(strtolower(responsableVisible($ticket) ?: 'sin asignar')) ?>" 
                                                  data-requester-name="<?= htmlspecialchars(strtolower($ticket['requester_name'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" 
                                                  data-date="<?= htmlspecialchars(substr($ticket['created_at'] ?? '', 0, 10)) ?>"
                                                  data-due-date="<?= htmlspecialchars($ticket['due_date'] ?? '') ?>"

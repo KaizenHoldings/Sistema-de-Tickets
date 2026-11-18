@@ -350,7 +350,7 @@ $countReqResolved = count(array_filter($myReq, fn($t) => (int)($t['status_id'] ?
                             if ($prioLabel === 'Medium') $prioLabel = 'Media';
                             if ($prioLabel === 'Low') $prioLabel = 'Baja';
 
-                            $agentDisplay = !empty($mr['agent_name']) ? $mr['agent_name'] : (!empty($mr['responsable']) ? $mr['responsable'] : '');
+                            $agentDisplay = responsableVisible($mr);
                         ?>
                             <tr class="ticket-row my-ticket-row" 
                                 data-ticket-id="<?= (int)$mr['id'] ?>"

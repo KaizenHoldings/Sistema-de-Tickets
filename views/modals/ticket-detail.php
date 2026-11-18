@@ -101,6 +101,18 @@
                         </datalist>
                     </div>
 
+                    <!-- 4.1 Solicitante (quien pidio el servicio) -->
+                    <div class="fd-prop-group">
+                        <label for="modal-sp-requested-by-input">Solicitante:</label>
+                        <input type="text" id="modal-sp-requested-by-input" list="modal-sp-solicitantes-datalist" class="fd-filter-input" placeholder="Quién pidió la solicitud..." style="width:100%; min-height:36px; padding:0.45rem 0.6rem; font-size:13px; border-radius:6px; border:1px solid #CBD5E1;">
+                        <small id="modal-sp-created-by-hint" style="display:none; color:#64748B; font-size:11px; margin-top:2px;"></small>
+                        <datalist id="modal-sp-solicitantes-datalist">
+                            <?php foreach ($uniqueSolicitantes as $sol): ?>
+                                <option value="<?= htmlspecialchars($sol) ?>"><?= htmlspecialchars($sol) ?></option>
+                            <?php endforeach; ?>
+                        </datalist>
+                    </div>
+
                     <!-- 5. Área -->
                     <div class="fd-prop-group">
                         <label for="modal-sp-area-select">Área:</label>
@@ -166,6 +178,7 @@
                             <div class="fd-avatar-sm" id="modal-author-avatar">U</div>
                             <div>
                                 <strong id="modal-ticket-requester">-</strong>
+                                <span id="modal-ticket-registered-by" style="display:none; color:var(--fd-text-dim); font-size:11px; margin-left:6px;"></span>
                                 <span style="color:var(--fd-text-dim); font-size:12px; margin-left:6px;" id="modal-ticket-date"></span>
                             </div>
                         </div>

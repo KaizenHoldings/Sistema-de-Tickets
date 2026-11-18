@@ -1,0 +1,41 @@
+# Carpeta de evidencias adjuntas de los tickets.
+#
+# El controlador ya valida extensión y tipo MIME real antes de guardar nada,
+# así que aquí no debería existir código ejecutable. Esto es una segunda
+# barrera por si esa validación fallara o se relajara en el futuro.
+
+# 1. Nunca ejecutar código en esta carpeta.
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php8.c>
+    php_flag engine off
+</IfModule>
+
+RemoveHandler .php .phtml .php3 .php4 .php5 .php7 .php8 .phar .cgi .pl .py .sh
+RemoveType .php .phtml .php3 .php4 .php5 .php7 .php8 .phar
+
+# 2. Denegar TODO por defecto y abrir solo los formatos que el controlador
+#    admite. Una lista de prohibidos siempre deja huecos; una de permitidos no.
+#    En Apache 2.4 la última sección que coincide es la que manda, así que el
+#    bloque permisivo debe ir después del restrictivo.
+<FilesMatch ".*">
+    Require all denied
+</FilesMatch>
+
+<FilesMatch "\.(jpg|jpeg|png|gif|webp|pdf)$">
+    Require all granted
+</FilesMatch>
+
+# 3. Evitar que el navegador reinterprete el tipo de contenido.
+#    Sin 'sandbox' en el CSP: esa directiva bloquea el visor de PDF integrado
+#    del navegador y dejaría las evidencias en PDF sin poder abrirse.
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set Content-Security-Policy "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; object-src 'none'; frame-ancestors 'self'"
+</IfModule>
+
+Options -Indexes -ExecCGI

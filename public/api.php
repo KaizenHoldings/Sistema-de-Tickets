@@ -182,6 +182,20 @@ try {
         exit;
     }
 
+    // Listado de columnas de la lista de SharePoint (SOLO LECTURA).
+    // Permite identificar el nombre interno real de la columna del solicitante
+    // antes de habilitar SHAREPOINT_FIELD_REQUESTED_BY en el .env.
+    if ($action === 'get_sharepoint_columns') {
+        if (($currentUser['role_name'] ?? '') !== 'admin') {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'message' => 'Solo los administradores pueden inspeccionar el esquema de SharePoint.']);
+            exit;
+        }
+        $spService = new SharePointService();
+        echo json_encode($spService->getListColumns());
+        exit;
+    }
+
     if ($action === 'get_sharepoint_item') {
         $itemId = (int)($_GET['item_id'] ?? 0);
         $spService = new SharePointService();

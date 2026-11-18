@@ -8,6 +8,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     unzip \
     && docker-php-ext-install pdo pdo_mysql \
     && a2enmod rewrite \
+    # mod_headers lo necesita public/uploads/.htaccess para enviar las cabeceras
+    # de seguridad de las evidencias (nosniff y CSP). Sin este módulo, Apache
+    # ignora el bloque <IfModule mod_headers.c> sin avisar.
+    && a2enmod headers \
     && rm -rf /var/lib/apt/lists/*
 
 # Configurar variables de entorno en php.ini (EGPCS), charset UTF-8 y límites de subida de archivos

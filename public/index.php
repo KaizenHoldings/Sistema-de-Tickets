@@ -65,9 +65,26 @@ $baseDefaultCompanies = [
 $uniqueCompanies = $baseDefaultCompanies;
 $uniqueStatuses = [];
 $uniqueResponsables = [];
+$uniqueSolicitantes = [];
 $uniqueRequesters = [];
 $uniqueAgents = [];
 $reportsAnalytics = null;
+
+/**
+ * Nombre del responsable para mostrar.
+ *
+ * La sincronizacion historica guardaba el literal 'Sin Asignar' en la columna
+ * 'responsable'. Al ser una cadena no vacia, impedia que la interfaz recurriera
+ * al nombre del agente realmente asignado y los tickets asignados desde la app
+ * se seguian viendo como "Sin Asignar". Aqui ese literal cuenta como vacio.
+ */
+function responsableVisible(?array $t): string {
+    $resp = trim((string)($t['responsable'] ?? ''));
+    if ($resp !== '' && strcasecmp($resp, 'Sin Asignar') !== 0) {
+        return $resp;
+    }
+    return trim((string)($t['agent_name'] ?? ''));
+}
 
 $userAreaId = (int)($currentUser['area_id'] ?? 1);
 $role = $currentUser['role_name'] ?? 'colaborador';
@@ -194,6 +211,7 @@ try {
         'SSGG' => 'SSGG (Servicios Generales)'
     ];
     $uniqueResponsables = [];
+    $uniqueSolicitantes = [];
 
     // Mantener variables para compatibilidad
     $uniqueRequesters = [];
@@ -228,8 +246,16 @@ try {
             'name' => $ac
         ];
 
+        // Solicitantes conocidos para el autocompletado: lo escrito en la app
+        // y tambien quien cargo la solicitud en SharePoint (personas reales).
+        foreach ([trim($t['requested_by'] ?? ''), trim($t['sp_created_by'] ?? '')] as $sol) {
+            if ($sol !== '' && !isset($uniqueSolicitantes[$sol])) {
+                $uniqueSolicitantes[$sol] = $sol;
+            }
+        }
+
         // Responsable
-        $resp = trim($t['responsable'] ?? $t['agent_name'] ?? '');
+        $resp = responsableVisible($t);
         if (!empty($resp) && $resp !== 'Sin Asignar' && !isset($uniqueResponsables[$resp])) {
             $uniqueResponsables[$resp] = $resp;
             $uniqueAgents[mb_strtolower($resp)] = [
@@ -254,6 +280,7 @@ try {
     }
     ksort($uniqueCompanies);
     ksort($uniqueResponsables);
+    ksort($uniqueSolicitantes);
     ksort($uniqueRequesters);
     ksort($uniqueAgents);
 } catch (Throwable $e) {}

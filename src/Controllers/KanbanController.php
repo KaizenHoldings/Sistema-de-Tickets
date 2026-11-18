@@ -38,6 +38,7 @@ class KanbanController {
 
             $sql = "
                 SELECT t.id, t.code, t.title, t.priority, t.status_id, t.area_id,
+                       t.company_name, t.requested_by, t.sp_created_by,
                        u_req.name as requester_name,
                        u_ag.name as agent_name,
                        t.created_at

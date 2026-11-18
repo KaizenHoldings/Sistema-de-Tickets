@@ -7,6 +7,10 @@
 
         <form id="create-ticket-form" enctype="multipart/form-data">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken) ?>">
+            <!-- Identificador unico de ESTE envio. Si la peticion se repite (doble
+                 clic, reintento por red, recarga), el servidor reconoce el token y
+                 devuelve el ticket ya creado en lugar de crear otro. -->
+            <input type="hidden" name="creation_token" id="create_creation_token" value="">
 
             <!-- 1. SOLICITUD (ASUNTO) -->
             <div class="form-group">
@@ -43,6 +47,18 @@
                         <option value="SSGG">SSGG (Servicios Generales y Mantenimiento)</option>
                     </select>
                 </div>
+            </div>
+
+            <!-- FILA 1.5: SOLICITANTE (QUIEN PIDIO EL SERVICIO) -->
+            <div class="form-group">
+                <label for="create_requested_by" style="font-weight:600; color:#1E293B;">Solicitante (Quién pidió la solicitud):</label>
+                <input type="text" name="requested_by" id="create_requested_by" list="create-solicitantes-datalist" class="form-control" placeholder="Nombre de la persona que solicita el servicio...">
+                <datalist id="create-solicitantes-datalist">
+                    <?php foreach ($uniqueSolicitantes as $sol): ?>
+                        <option value="<?= htmlspecialchars($sol) ?>"><?= htmlspecialchars($sol) ?></option>
+                    <?php endforeach; ?>
+                </datalist>
+                <small style="color:#64748B; font-size:11px;">Persona que realizó el requerimiento. Si se deja vacío se usará el usuario que registra.</small>
             </div>
 
             <!-- FILA 2: RESPONSABLE Y ESTATUS -->

@@ -144,9 +144,9 @@
                                  data-code="<?= strtolower($pt['code']) ?>"
                                  data-title="<?= htmlspecialchars(strtolower($pt['title'])) ?>"
                                  data-desc="<?= htmlspecialchars(strtolower($ptDescription)) ?>"
-                                 data-requester="<?= htmlspecialchars(strtolower($pt['requester_name'] ?? '')) ?>"
+                                 data-requester="<?= htmlspecialchars(strtolower(trim($pt['requested_by'] ?? '') !== '' ? $pt['requested_by'] : (trim($pt['sp_created_by'] ?? '') !== '' ? $pt['sp_created_by'] : ($pt['requester_name'] ?? '')))) ?>"
                                  data-company="<?= htmlspecialchars(strtolower($pt['company_name'] ?? '')) ?>"
-                                 data-agent="<?= htmlspecialchars(strtolower($pt['responsable'] ?? $pt['agent_name'] ?? 'sin asignar')) ?>"
+                                 data-agent="<?= htmlspecialchars(strtolower(responsableVisible($pt) ?: 'sin asignar')) ?>"
                                  data-agent-id="<?= (int)($pt['assigned_agent_id'] ?? 0) ?>"
                                  data-area="<?= $ptArea ?>"
                                  data-status-id="<?= $ptStatusId ?>"
@@ -195,7 +195,7 @@
                                     <div class="fd-task-meta-row">
                                         <div class="fd-task-requester" title="Solicitante">
                                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                                            <span><strong><?= htmlspecialchars($pt['requester_name'] ?? 'Usuario') ?></strong> <?= !empty($pt['company_name']) ? '· ' . htmlspecialchars($pt['company_name']) : '' ?></span>
+                                            <span><strong><?= htmlspecialchars(trim($pt['requested_by'] ?? '') !== '' ? $pt['requested_by'] : (trim($pt['sp_created_by'] ?? '') !== '' ? $pt['sp_created_by'] : ($pt['requester_name'] ?? 'Usuario'))) ?></strong> <?= !empty($pt['company_name']) ? '· ' . htmlspecialchars($pt['company_name']) : '' ?></span>
                                         </div>
                                         <div class="fd-task-time" title="Fecha de Registro">
                                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
@@ -215,9 +215,9 @@
                                             </span>
                                         <?php else: ?>
                                             <div class="fd-avatar-sm" style="width:26px; height:26px; font-size:10px; background:#2563EB;">
-                                                <?= strtoupper(substr($pt['responsable'] ?? $pt['agent_name'] ?? 'AG', 0, 2)) ?>
+                                                <?= strtoupper(substr(responsableVisible($pt) ?: 'AG', 0, 2)) ?>
                                             </div>
-                                            <span style="font-weight:600; color:#1E293B; font-size:12px;"><?= htmlspecialchars($pt['responsable'] ?? $pt['agent_name']) ?></span>
+                                            <span style="font-weight:600; color:#1E293B; font-size:12px;"><?= htmlspecialchars(responsableVisible($pt) ?: 'Sin Asignar') ?></span>
                                         <?php endif; ?>
                                     </div>
 
@@ -287,9 +287,9 @@
                                         data-code="<?= strtolower($pt['code']) ?>"
                                         data-title="<?= htmlspecialchars(strtolower($pt['title'])) ?>"
                                         data-desc="<?= htmlspecialchars(strtolower($ptDescription)) ?>"
-                                        data-requester="<?= htmlspecialchars(strtolower($pt['requester_name'] ?? '')) ?>"
+                                        data-requester="<?= htmlspecialchars(strtolower(trim($pt['requested_by'] ?? '') !== '' ? $pt['requested_by'] : (trim($pt['sp_created_by'] ?? '') !== '' ? $pt['sp_created_by'] : ($pt['requester_name'] ?? '')))) ?>"
                                         data-company="<?= htmlspecialchars(strtolower($pt['company_name'] ?? '')) ?>"
-                                        data-agent="<?= htmlspecialchars(strtolower($pt['responsable'] ?? $pt['agent_name'] ?? 'sin asignar')) ?>"
+                                        data-agent="<?= htmlspecialchars(strtolower(responsableVisible($pt) ?: 'sin asignar')) ?>"
                                         data-agent-id="<?= (int)($pt['assigned_agent_id'] ?? 0) ?>"
                                         data-area="<?= $ptArea ?>"
                                         data-status-id="<?= $ptStatusId ?>"
@@ -312,14 +312,14 @@
                                             </div>
                                         </td>
                                         <td>
-                                            <div style="font-size:12.5px; font-weight:600; color:#1E293B;"><?= htmlspecialchars($pt['requester_name'] ?? 'Usuario') ?></div>
+                                            <div style="font-size:12.5px; font-weight:600; color:#1E293B;"><?= htmlspecialchars(trim($pt['requested_by'] ?? '') !== '' ? $pt['requested_by'] : (trim($pt['sp_created_by'] ?? '') !== '' ? $pt['sp_created_by'] : ($pt['requester_name'] ?? 'Usuario'))) ?></div>
                                             <div style="font-size:11px; color:#94A3B8;"><?= htmlspecialchars($pt['company_name'] ?? 'Kaizen') ?></div>
                                         </td>
                                         <td>
                                             <?php if ($ptIsUnassigned): ?>
                                                 <span class="fd-task-unassigned-tag">Sin Asignar</span>
                                             <?php else: ?>
-                                                <span style="font-size:12.5px; font-weight:600; color:#2563EB;"><?= htmlspecialchars($pt['responsable'] ?? $pt['agent_name']) ?></span>
+                                                <span style="font-size:12.5px; font-weight:600; color:#2563EB;"><?= htmlspecialchars(responsableVisible($pt) ?: 'Sin Asignar') ?></span>
                                             <?php endif; ?>
                                         </td>
                                         <td>

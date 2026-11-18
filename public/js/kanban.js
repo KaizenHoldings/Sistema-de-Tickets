@@ -541,7 +541,10 @@ function initNewTicketForm() {
 
             const result = await response.json();
             if (result.success) {
-                showToast(result.message, result.warning ? 'warning' : 'success');
+                // result.duplicate = el servidor reconocio el token y devolvio el
+                // ticket que ya existia, en lugar de crear uno repetido.
+                const tipo = result.duplicate ? 'info' : (result.warning ? 'warning' : 'success');
+                showToast(result.message, tipo);
                 form.reset();
                 const customContainer = document.getElementById('create_company_custom_container');
                 if (customContainer) customContainer.style.display = 'none';
@@ -1095,20 +1098,34 @@ function initAssignFormSubmit() {
 
             const result = await response.json();
             if (result.success) {
-                showToast(result.message, 'success');
+                // result.warning = se guardo en el sistema pero SharePoint no lo acepto
+                showToast(result.message, result.warning ? 'warning' : 'success');
                 document.getElementById('assign-modal').style.display = 'none';
+
+                // El servidor devuelve el nombre tal y como lo guardo; el texto del
+                // desplegable se recorta por el primer guion y puede quedar incompleto.
+                const savedName = (result.responsable || result.agent_name || agentName || '').trim();
+
+                // Mantener en memoria el ticket abierto para que no se vea desasignado
+                if (currentTicketData && parseInt(currentTicketData.id) === parseInt(ticketId)) {
+                    currentTicketData.responsable = savedName;
+                    currentTicketData.agent_name = savedName;
+                    currentTicketData.assigned_agent_id = parseInt(agentId);
+                }
 
                 // Actualizar campo unificado de responsable en el modal principal si está abierto
                 const spRespInput = document.getElementById('modal-sp-responsable-input');
-                if (spRespInput) spRespInput.value = agentName;
+                if (spRespInput) spRespInput.value = savedName;
                 const agentSpan = document.getElementById('modal-ticket-agent');
-                if (agentSpan) agentSpan.textContent = agentName;
+                if (agentSpan) agentSpan.textContent = savedName;
                 
                 // Actualizar botón a "Reasignar Agente" y estado en las tablas
                 document.querySelectorAll(`tr[data-ticket-id="${ticketId}"]`).forEach(row => {
                     row.dataset.agentId = agentId;
+                    row.dataset.agentName = savedName.toLowerCase();
+                    row.dataset.responsable = savedName.toLowerCase();
                     const agentDisplay = row.querySelector('.agent-name-display');
-                    if (agentDisplay) agentDisplay.textContent = agentName;
+                    if (agentDisplay) agentDisplay.textContent = savedName;
 
                     const assignBtn = row.querySelector('button[onclick*="openAssignAgentDialog"]');
                     if (assignBtn) {
@@ -1188,7 +1205,6 @@ async function openTicketModal(ticketId) {
 
             document.getElementById('modal-ticket-title').textContent = `${ticket.code}: ${ticket.title}`;
             document.getElementById('modal-ticket-description').textContent = ticket.description;
-            document.getElementById('modal-ticket-requester').textContent = `${ticket.requester_name} (${ticket.requester_email})`;
             document.getElementById('modal-ticket-agent').textContent = ticket.agent_name || 'Sin Asignar';
             document.getElementById('modal-ticket-area').textContent = ticket.area_name;
             document.getElementById('modal-ticket-id-input').value = ticket.id;
@@ -1228,7 +1244,36 @@ async function openTicketModal(ticketId) {
             if (spAreaSelect) spAreaSelect.value = ticket.area_code || ((parseInt(ticket.area_id) === 3) ? 'SSGG' : 'IT');
 
             const spRespInput = document.getElementById('modal-sp-responsable-input');
-            if (spRespInput) spRespInput.value = ticket.responsable || ticket.agent_name || '';
+            // 'Sin Asignar' es un literal que dejaba la sincronizacion antigua: cuenta
+            // como vacio para poder recurrir al nombre del agente realmente asignado.
+            const respRaw = (ticket.responsable || '').trim();
+            const respVisible = (respRaw && respRaw.toLowerCase() !== 'sin asignar')
+                ? respRaw
+                : (ticket.agent_name || '').trim();
+            if (spRespInput) spRespInput.value = respVisible;
+
+            const spReqByInput = document.getElementById('modal-sp-requested-by-input');
+            if (spReqByInput) spReqByInput.value = ticket.requested_by || '';
+
+            // Quien cargo la solicitud en SharePoint: es un dato de origen, no
+            // editable, y sirve de referencia cuando no hay solicitante escrito.
+            const createdByHint = document.getElementById('modal-sp-created-by-hint');
+            if (createdByHint) {
+                const spAuthor = (ticket.sp_created_by || '').trim();
+                const spAuthorMail = (ticket.sp_created_by_email || '').trim();
+                if (spAuthor) {
+                    createdByHint.textContent = spAuthorMail
+                        ? `Cargado en SharePoint por ${spAuthor} (${spAuthorMail})`
+                        : `Cargado en SharePoint por ${spAuthor}`;
+                    createdByHint.style.display = 'block';
+                    if (spReqByInput && !spReqByInput.value) {
+                        spReqByInput.placeholder = spAuthor;
+                    }
+                } else {
+                    createdByHint.textContent = '';
+                    createdByHint.style.display = 'none';
+                }
+            }
 
             const spTitleInput = document.getElementById('modal-sp-title-input');
             if (spTitleInput) spTitleInput.value = ticket.title || '';
@@ -1256,9 +1301,37 @@ async function openTicketModal(ticketId) {
                 prioPill.className = `fd-prio-badge fd-prio-${ticket.priority || 'medium'}`;
             }
 
+            // Prioridad: solicitante escrito en la app > quien lo cargo en SharePoint
+            const solicitante = (ticket.requested_by || '').trim()
+                || (ticket.sp_created_by || '').trim();
+
+            const requesterEl = document.getElementById('modal-ticket-requester');
+            if (requesterEl) {
+                if (solicitante) {
+                    requesterEl.textContent = solicitante;
+                } else if (ticket.requester_name) {
+                    requesterEl.textContent = ticket.requester_email
+                        ? `${ticket.requester_name} (${ticket.requester_email})`
+                        : ticket.requester_name;
+                } else {
+                    requesterEl.textContent = '-';
+                }
+            }
+
+            const registeredByEl = document.getElementById('modal-ticket-registered-by');
+            if (registeredByEl) {
+                if (solicitante && ticket.requester_name && solicitante !== ticket.requester_name) {
+                    registeredByEl.textContent = `(registrado por ${ticket.requester_name})`;
+                    registeredByEl.style.display = 'inline';
+                } else {
+                    registeredByEl.textContent = '';
+                    registeredByEl.style.display = 'none';
+                }
+            }
+
             const avatarEl = document.getElementById('modal-author-avatar');
             if (avatarEl) {
-                avatarEl.textContent = (ticket.requester_name || 'U').substring(0, 2).toUpperCase();
+                avatarEl.textContent = (solicitante || ticket.requester_name || 'U').substring(0, 2).toUpperCase();
             }
 
             const dateEl = document.getElementById('modal-ticket-date');
@@ -1932,6 +2005,7 @@ async function saveModalSharePointChanges() {
     const companyName = (document.getElementById('modal-sp-company-input')?.value || '').trim();
     const areaCode = (document.getElementById('modal-sp-area-select')?.value || 'IT').trim();
     const responsable = (document.getElementById('modal-sp-responsable-input')?.value || '').trim();
+    const requestedBy = (document.getElementById('modal-sp-requested-by-input')?.value || '').trim();
     const observations = (document.getElementById('modal-sp-observations-input')?.value || '').trim();
     const spStatus = (document.getElementById('modal-sp-status-select')?.value || 'Pendiente').trim();
     const priority = (document.getElementById('modal-prop-priority-select')?.value || 'medium').trim();
@@ -1967,6 +2041,7 @@ async function saveModalSharePointChanges() {
             company_name: companyName,
             area_code: areaCode,
             responsable: responsable,
+            requested_by: requestedBy,
             observations: observations,
             sp_status: spStatus,
             priority: priority,
@@ -2028,6 +2103,8 @@ async function saveModalSharePointChanges() {
                 row.dataset.areaName = (updated.area_code || '').toLowerCase();
                 row.dataset.responsable = (updated.responsable || 'sin asignar').toLowerCase();
                 row.dataset.observations = (updated.observations || '').toLowerCase();
+                row.dataset.solicitante = ((updated.requested_by || '').trim()
+                    || (updated.sp_created_by || '').trim()).toLowerCase();
                 row.dataset.spStatus = (updated.sp_status || '').toLowerCase();
                 row.dataset.statusName = (updated.sp_status || '').toLowerCase();
 
@@ -2035,9 +2112,18 @@ async function saveModalSharePointChanges() {
                 if (link) link.textContent = updated.title;
 
                 const cells = row.querySelectorAll('td');
-                if (cells.length >= 8) {
-                    // Celda 2: Empresa
+                // Orden de columnas de #all-tickets-table:
+                // 0 Solicitud | 1 Empresa | 2 Solicitante | 3 Area | 4 Responsable
+                // 5 Observaciones | 6 Estatus | 7 Fecha Solicitud | 8 Fecha Propuesta
+                // 9 Fecha Cierre | 10 Accion
+                if (cells.length >= 9) {
+                    // Celda 1: Empresa
                     cells[1].innerHTML = `<div style="font-weight:600; color:#1E293B; font-size:13px;">${escapeHtml(updated.company_name || 'N/A')}</div>`;
+
+                    // Celda 2: Solicitante
+                    const solValue = (updated.requested_by || '').trim() || (updated.sp_created_by || '').trim();
+                    const solDisplay = solValue ? escapeHtml(solValue) : '<span style="color:#CBD5E1;">&mdash;</span>';
+                    cells[2].innerHTML = `<span style="font-size:12px; color:#334155;">${solDisplay}</span>`;
 
                     // Celda 3: Área
                     const aCode = (updated.area_code || 'IT').toUpperCase();
@@ -2045,15 +2131,15 @@ async function saveModalSharePointChanges() {
                     const aIcon = (aCode === 'SSGG') 
                         ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>' 
                         : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px; margin-right:3px;"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>';
-                    cells[2].innerHTML = `<span class="fd-area-badge ${aClass}">${aIcon}${escapeHtml(aCode)}</span>`;
+                    cells[3].innerHTML = `<span class="fd-area-badge ${aClass}">${aIcon}${escapeHtml(aCode)}</span>`;
 
                     // Celda 4: Responsable
                     const respDisplay = updated.responsable ? escapeHtml(updated.responsable) : '<em style="color:#94a3b8">Sin Asignar</em>';
-                    cells[3].innerHTML = `<span class="agent-name-display" style="font-weight:500; font-size:12px; color:#334155;">${respDisplay}</span>`;
+                    cells[4].innerHTML = `<span class="agent-name-display" style="font-weight:500; font-size:12px; color:#334155;">${respDisplay}</span>`;
 
                     // Celda 5: Observaciones
                     const obsDisplay = updated.observations ? escapeHtml(updated.observations) : '<span style="color:#CBD5E1;">—</span>';
-                    cells[4].innerHTML = `<div class="fd-observations-cell" title="${escapeHtml(updated.observations || '')}">${obsDisplay}</div>`;
+                    cells[5].innerHTML = `<div class="fd-observations-cell" title="${escapeHtml(updated.observations || '')}">${obsDisplay}</div>`;
 
                     // Celda 6: Estatus
                     let stClass = 'fd-status-pendiente';
@@ -2061,23 +2147,35 @@ async function saveModalSharePointChanges() {
                     if (stLower.includes('procesado')) stClass = 'fd-status-procesado';
                     else if (stLower.includes('en proceso') || stLower.includes('en_proceso')) stClass = 'fd-status-en-proceso';
                     else if (stLower.includes('stand by') || stLower.includes('stand_by')) stClass = 'fd-status-stand-by';
-                    cells[5].innerHTML = `<span class="fd-status-badge ${stClass}">${escapeHtml(updated.sp_status)}</span>`;
+                    cells[6].innerHTML = `<span class="fd-status-badge ${stClass}">${escapeHtml(updated.sp_status)}</span>`;
 
                     // Celda 7: Fecha Solicitud
-                    if (cells.length >= 7 && updated.created_at) {
-                        cells[6].innerHTML = escapeHtml(updated.created_at.substring(0, 10));
+                    if (cells.length >= 8 && updated.created_at) {
+                        cells[7].innerHTML = escapeHtml(updated.created_at.substring(0, 16));
                     }
 
                     // Celda 8: Fecha Propuesta
-                    if (cells.length >= 8 && updated.due_date !== undefined) {
-                        cells[7].innerHTML = updated.due_date ? escapeHtml(updated.due_date.substring(0, 10)) : '<span style="color:#CBD5E1;">—</span>';
+                    if (cells.length >= 9 && updated.due_date !== undefined) {
+                        cells[8].innerHTML = updated.due_date ? escapeHtml(updated.due_date.substring(0, 16)) : '<span style="color:#CBD5E1;">—</span>';
                     }
 
-                    // Celda 9: Fecha Cierre (si está en la tabla de 10 columnas)
-                    if (cells.length >= 10 && updated.resolved_at !== undefined) {
-                        cells[8].innerHTML = updated.resolved_at ? escapeHtml(updated.resolved_at.substring(0, 16)) : '<span style="color:#CBD5E1;">—</span>';
+                    // Celda 9: Fecha Cierre
+                    if (cells.length >= 11 && updated.resolved_at !== undefined) {
+                        cells[9].innerHTML = updated.resolved_at ? escapeHtml(updated.resolved_at.substring(0, 16)) : '<span style="color:#CBD5E1;">—</span>';
                     }
                 }
+            }
+
+            // Reflejar la fecha y hora de solicitud ya normalizada por el servidor
+            const dateElAfterSave = document.getElementById('modal-ticket-date');
+            if (dateElAfterSave) {
+                dateElAfterSave.textContent = updated.created_at ? `Creado el ${updated.created_at.substring(0, 16)}` : '';
+            }
+            const createdInputAfterSave = document.getElementById('modal-sp-created-input');
+            if (createdInputAfterSave) {
+                createdInputAfterSave.value = updated.created_at
+                    ? updated.created_at.replace(' ', 'T').substring(0, 16)
+                    : '';
             }
 
             // Actualizar pill de prioridad si cambió
@@ -2096,7 +2194,11 @@ async function saveModalSharePointChanges() {
                     feedback.style.display = 'none';
                 }, 4000);
             }
-            showToast('Ticket actualizado exitosamente.', 'success');
+            if (result.warning && result.message) {
+                showToast(result.message, 'warning');
+            } else {
+                showToast('Ticket actualizado exitosamente.', 'success');
+            }
         } else {
             if (feedback) {
                 feedback.style.display = 'block';

@@ -70,8 +70,12 @@ CREATE TABLE tickets (
     id INT AUTO_INCREMENT PRIMARY KEY,
     sharepoint_id INT NULL UNIQUE,
     code VARCHAR(50) NOT NULL UNIQUE,
+    creation_token VARCHAR(64) NULL UNIQUE, -- EVITA TICKETS DUPLICADOS POR DOBLE ENVIO DEL FORMULARIO
     title VARCHAR(255) NOT NULL,
     company_name VARCHAR(150) NULL,
+    requested_by VARCHAR(150) NULL, -- NOMBRE DE LA PERSONA QUE SOLICITO EL SERVICIO
+    sp_created_by VARCHAR(150) NULL, -- QUIEN CARGO LA SOLICITUD EN SHAREPOINT (faceta createdBy)
+    sp_created_by_email VARCHAR(150) NULL,
     area_code VARCHAR(20) NULL,
     responsable VARCHAR(100) NULL,
     observations TEXT NULL,

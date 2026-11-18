@@ -13,6 +13,23 @@ class SharePointService {
     private string $siteId;
     private string $listName;
 
+    /**
+     * Nombre interno de la columna de SharePoint que guarda el SOLICITANTE
+     * (por ejemplo "field_3"). Se configura con SHAREPOINT_FIELD_REQUESTED_BY
+     * en el .env. Si queda vacio, el solicitante vive SOLO en la base local y
+     * no se lee ni se escribe nada en SharePoint.
+     */
+    private string $fieldRequestedBy = '';
+
+    /** Cache del tipo de la columna del solicitante ('text', 'personOrGroup', ...) */
+    private ?string $fieldRequestedByType = null;
+
+    /** Cache de resoluciones nombre/correo -> LookupId del usuario del sitio */
+    private array $siteUserCache = [];
+
+    /** Ultimo aviso no bloqueante generado al hablar con SharePoint */
+    private string $lastWarning = '';
+
     public function __construct(?PDO $db = null) {
         if ($db !== null) {
             $this->db = $db;
@@ -57,6 +74,325 @@ class SharePointService {
         $this->clientSecret = getenv('GRAPH_CLIENT_SECRET') ?: ($_ENV['GRAPH_CLIENT_SECRET'] ?? ($_SERVER['GRAPH_CLIENT_SECRET'] ?? ($envMap['GRAPH_CLIENT_SECRET'] ?? '')));
         $this->siteId = getenv('VITE_SHAREPOINT_SITE_ID') ?: ($_ENV['VITE_SHAREPOINT_SITE_ID'] ?? ($_SERVER['VITE_SHAREPOINT_SITE_ID'] ?? ($envMap['VITE_SHAREPOINT_SITE_ID'] ?? '')));
         $this->listName = getenv('VITE_LIST_NAME') ?: ($_ENV['VITE_LIST_NAME'] ?? ($_SERVER['VITE_LIST_NAME'] ?? ($envMap['VITE_LIST_NAME'] ?? 'Solicitudes - SSGG e IT')));
+
+        $rawFieldReqBy = getenv('SHAREPOINT_FIELD_REQUESTED_BY') ?: ($_ENV['SHAREPOINT_FIELD_REQUESTED_BY'] ?? ($_SERVER['SHAREPOINT_FIELD_REQUESTED_BY'] ?? ($envMap['SHAREPOINT_FIELD_REQUESTED_BY'] ?? '')));
+        $rawFieldReqBy = trim((string)$rawFieldReqBy);
+        // Solo se aceptan nombres internos validos de columna (letras, numeros y _)
+        $this->fieldRequestedBy = preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $rawFieldReqBy) ? $rawFieldReqBy : '';
+    }
+
+    /**
+     * Nombre interno de la columna de SharePoint mapeada al solicitante.
+     * Cadena vacia = integracion desactivada (el dato queda solo en local).
+     */
+    public function getRequestedByField(): string {
+        return $this->fieldRequestedBy;
+    }
+
+    /**
+     * Ultimo aviso no bloqueante (por ejemplo, un solicitante que no pudo
+     * resolverse como usuario de SharePoint). Se consume y se limpia.
+     */
+    public function consumeLastWarning(): string {
+        $w = $this->lastWarning;
+        $this->lastWarning = '';
+        return $w;
+    }
+
+    /**
+     * Tipo de una columna de la lista (OPERACION DE SOLO LECTURA, cacheada).
+     * Devuelve 'text', 'personOrGroup', 'choice', 'dateTime', ... o 'desconocido'.
+     */
+    public function getColumnType(string $internalName): string {
+        if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $internalName)) {
+            return 'desconocido';
+        }
+
+        try {
+            $token = $this->getAccessToken();
+            $listId = $this->getListId($token);
+            $url = "https://graph.microsoft.com/v1.0/sites/{$this->siteId}/lists/{$listId}/columns/{$internalName}";
+
+            $context = stream_context_create([
+                'http' => [
+                    'method'  => 'GET',
+                    'header'  => "Authorization: Bearer {$token}\r\nAccept: application/json\r\n",
+                    'timeout' => 10,
+                    'ignore_errors' => true
+                ]
+            ]);
+            $response = @file_get_contents($url, false, $context);
+            if ($response === false) {
+                return 'desconocido';
+            }
+
+            $col = json_decode($response, true);
+            foreach (['text', 'personOrGroup', 'choice', 'dateTime', 'number', 'boolean', 'lookup', 'currency', 'hyperlinkOrPicture', 'calculated'] as $t) {
+                if (isset($col[$t])) {
+                    return $t;
+                }
+            }
+            return 'desconocido';
+        } catch (\Throwable $e) {
+            return 'desconocido';
+        }
+    }
+
+    /**
+     * ¿La columna del solicitante es de tipo "Persona o grupo"?
+     * El resultado se cachea por instancia para no repetir la consulta.
+     */
+    private function requestedByIsPersonField(): bool {
+        if ($this->fieldRequestedBy === '') {
+            return false;
+        }
+        if ($this->fieldRequestedByType === null) {
+            $this->fieldRequestedByType = $this->getColumnType($this->fieldRequestedBy);
+        }
+        return ($this->fieldRequestedByType === 'personOrGroup');
+    }
+
+    /**
+     * Resolver un nombre o correo al LookupId del usuario dentro del sitio
+     * (OPERACION DE SOLO LECTURA sobre la "User Information List" del sitio).
+     *
+     * Las columnas de tipo Persona no aceptan texto: Graph exige escribir en
+     * "<columna>LookupId" el identificador numerico del usuario del sitio.
+     *
+     * Devuelve null si no se encuentra una coincidencia inequivoca.
+     */
+    public function resolveSiteUserLookupId(string $nameOrEmail): ?int {
+        $needle = trim($nameOrEmail);
+        if ($needle === '') {
+            return null;
+        }
+
+        $cacheKey = mb_strtolower($needle);
+        if (array_key_exists($cacheKey, $this->siteUserCache)) {
+            return $this->siteUserCache[$cacheKey];
+        }
+
+        $found = null;
+        try {
+            $token = $this->getAccessToken();
+            $base = "https://graph.microsoft.com/v1.0/sites/{$this->siteId}/lists/User Information List/items"
+                  . "?expand=fields(select=Title,EMail,UserName,Name)&\$top=200";
+            $url = str_replace(' ', '%20', $base);
+
+            $context = stream_context_create([
+                'http' => [
+                    'method'  => 'GET',
+                    'header'  => "Authorization: Bearer {$token}\r\nAccept: application/json\r\n"
+                               . "Prefer: HonorNonIndexedQueriesWarningMayFailRandomly\r\n",
+                    'timeout' => 15,
+                    'ignore_errors' => true
+                ]
+            ]);
+
+            $guard = 0;
+            while ($url !== null && $guard < 25) {
+                $guard++;
+                $response = @file_get_contents($url, false, $context);
+                if ($response === false) {
+                    break;
+                }
+                $data = json_decode($response, true);
+                if (empty($data['value']) || !is_array($data['value'])) {
+                    break;
+                }
+
+                foreach ($data['value'] as $item) {
+                    $f = $item['fields'] ?? [];
+                    $title = mb_strtolower(trim((string)($f['Title'] ?? '')));
+                    $email = mb_strtolower(trim((string)($f['EMail'] ?? '')));
+                    if ($title === $cacheKey || ($email !== '' && $email === $cacheKey)) {
+                        $found = (int)($item['id'] ?? 0);
+                        break 2;
+                    }
+                }
+
+                $url = $data['@odata.nextLink'] ?? null;
+            }
+        } catch (\Throwable $e) {
+            $found = null;
+        }
+
+        if ($found !== null && $found <= 0) {
+            $found = null;
+        }
+        $this->siteUserCache[$cacheKey] = $found;
+        return $found;
+    }
+
+    /**
+     * ¿La porcion horaria "HH:MM:SS" corresponde a una hora real de negocio?
+     *
+     * Las columnas de SOLO FECHA de SharePoint guardan la medianoche de la zona
+     * horaria del sitio, que al serializarse a UTC cae siempre EN PUNTO
+     * (por ejemplo 08:00:00Z). Una hora escrita por una persona practicamente
+     * nunca cae exacta en la hora, asi que exigir minutos o segundos distintos
+     * de cero separa con fiabilidad un dato real de un artefacto de formato.
+     */
+    private function esHoraReal(string $hms): bool {
+        if (!preg_match('/^(\d{2}):(\d{2}):(\d{2})$/', $hms, $m)) {
+            return false;
+        }
+        return ($m[2] !== '00' || $m[3] !== '00');
+    }
+
+    /**
+     * Extraer quien cargo el elemento en SharePoint a partir de la faceta
+     * createdBy que Graph ya devuelve resuelta (nombre y correo), a diferencia
+     * de las columnas de persona, que solo entregan un LookupId.
+     *
+     * Devuelve ['name' => ?string, 'email' => ?string].
+     *
+     * Los elementos creados por esta propia aplicacion figuran como
+     * "Aplicacion de SharePoint" y sin correo; en ese caso no hay una persona
+     * real que mostrar y se devuelve null para que manden los datos locales.
+     */
+    private function extractItemAuthor(array $item): array {
+        $user = $item['createdBy']['user'] ?? [];
+        $name  = trim((string)($user['displayName'] ?? ''));
+        $email = trim((string)($user['email'] ?? ''));
+
+        // Varias cuentas de servicio llegan con doble espacio en el nombre
+        $name = trim(preg_replace('/\s+/u', ' ', $name));
+
+        if ($name === '' && $email === '') {
+            return ['name' => null, 'email' => null];
+        }
+
+        // Sin correo y con nombre de cuenta tecnica => no es una persona.
+        // Con correo se acepta siempre: es un usuario real del directorio.
+        if ($email === '') {
+            $tecnicas = '/(aplicaci[oó]n de sharepoint|sharepoint app|system account|microsoft graph|app sharepoint)/iu';
+            if ($name === '' || preg_match($tecnicas, $name)) {
+                return ['name' => null, 'email' => null];
+            }
+        }
+
+        return [
+            'name'  => $name !== '' ? $this->cleanUtf8($name) : null,
+            'email' => $email !== '' ? $email : null,
+        ];
+    }
+
+    /**
+     * Normalizar a texto el valor de la columna del solicitante tal como lo
+     * devuelve Graph. Las columnas de persona llegan como objeto; las de texto
+     * como cadena.
+     */
+    private function extractRequestedByValue($raw): string {
+        if (is_array($raw)) {
+            foreach (['LookupValue', 'DisplayName', 'Title', 'Email', 'EMail'] as $k) {
+                if (!empty($raw[$k]) && is_string($raw[$k])) {
+                    return trim($raw[$k]);
+                }
+            }
+            return '';
+        }
+        return trim((string)$raw);
+    }
+
+    /**
+     * Construir la entrada del payload de Graph para el solicitante.
+     * Devuelve [] si no hay columna mapeada o si no se puede resolver la persona.
+     */
+    private function buildRequestedByPayload(string $value): array {
+        if ($this->fieldRequestedBy === '') {
+            return [];
+        }
+
+        $value = trim($value);
+
+        if (!$this->requestedByIsPersonField()) {
+            // Columna de texto: se escribe el nombre tal cual.
+            return [$this->fieldRequestedBy => $value];
+        }
+
+        // Columna de Persona o grupo: requiere el LookupId del usuario del sitio.
+        // Un valor vacio NO borra la persona asignada en SharePoint: preferimos
+        // no tocar el dato de produccion antes que arriesgarnos a perderlo.
+        if ($value === '') {
+            return [];
+        }
+
+        $lookupId = $this->resolveSiteUserLookupId($value);
+        if ($lookupId === null) {
+            $this->lastWarning = "No se encontró a \"{$value}\" como usuario de SharePoint, "
+                . "así que el solicitante quedó guardado sólo en el sistema. "
+                . "Escríbelo igual que en el directorio (nombre completo) o usa su correo.";
+            return [];
+        }
+
+        return [$this->fieldRequestedBy . 'LookupId' => (string)$lookupId];
+    }
+
+    /**
+     * Listar las columnas de la lista de SharePoint (OPERACION DE SOLO LECTURA).
+     *
+     * Sirve para identificar el nombre interno real de la columna "Solicitante"
+     * antes de habilitar la sincronizacion, y asi no escribir en una columna
+     * equivocada de la lista de produccion.
+     */
+    public function getListColumns(): array {
+        try {
+            $token = $this->getAccessToken();
+            $listId = $this->getListId($token);
+            $url = "https://graph.microsoft.com/v1.0/sites/{$this->siteId}/lists/{$listId}/columns";
+
+            $context = stream_context_create([
+                'http' => [
+                    'method'  => 'GET',
+                    'header'  => "Authorization: Bearer {$token}\r\nAccept: application/json\r\n",
+                    'timeout' => 15,
+                    'ignore_errors' => true
+                ]
+            ]);
+
+            $response = @file_get_contents($url, false, $context);
+            if ($response === false) {
+                return ['success' => false, 'message' => 'No se pudo consultar las columnas de la lista.'];
+            }
+
+            $data = json_decode($response, true);
+            if (empty($data['value']) || !is_array($data['value'])) {
+                $apiMsg = $data['error']['message'] ?? 'Respuesta inesperada de Microsoft Graph.';
+                return ['success' => false, 'message' => $apiMsg];
+            }
+
+            $columns = [];
+            foreach ($data['value'] as $col) {
+                $type = 'desconocido';
+                foreach (['text', 'choice', 'dateTime', 'number', 'boolean', 'lookup', 'personOrGroup', 'currency', 'hyperlinkOrPicture', 'calculated'] as $t) {
+                    if (isset($col[$t])) {
+                        $type = $t;
+                        break;
+                    }
+                }
+                $columns[] = [
+                    'name'         => $col['name'] ?? '',
+                    'display_name' => $col['displayName'] ?? '',
+                    'type'         => $type,
+                    'read_only'    => !empty($col['readOnly']),
+                    'hidden'       => !empty($col['hidden']),
+                ];
+            }
+
+            return [
+                'success'           => true,
+                'list_name'         => $this->listName,
+                'mapped_field'      => $this->fieldRequestedBy,
+                'mapped_field_type' => ($this->fieldRequestedBy !== '')
+                    ? $this->getColumnType($this->fieldRequestedBy)
+                    : '',
+                'total'             => count($columns),
+                'columns'           => $columns,
+            ];
+        } catch (\Throwable $e) {
+            return ['success' => false, 'message' => 'Error: ' . $e->getMessage()];
+        }
     }
 
     /**
@@ -359,6 +695,10 @@ class SharePointService {
 
             $colsToAdd = [
                 'company_name' => "VARCHAR(150) NULL AFTER title",
+                'requested_by' => "VARCHAR(150) NULL AFTER company_name",
+                'sp_created_by' => "VARCHAR(150) NULL AFTER requested_by",
+                'sp_created_by_email' => "VARCHAR(150) NULL AFTER sp_created_by",
+                'creation_token' => "VARCHAR(64) NULL AFTER code",
                 'area_code'    => "VARCHAR(20) NULL AFTER area_id",
                 'responsable'  => "VARCHAR(100) NULL AFTER assigned_agent_id",
                 'observations' => "TEXT NULL AFTER description",
@@ -369,6 +709,13 @@ class SharePointService {
                 if (!$check) {
                     $this->db->exec("ALTER TABLE tickets ADD COLUMN {$colName} {$colDef}");
                 }
+            }
+
+            // Indice unico del token de creacion: es lo que impide, a nivel de
+            // base de datos, que un mismo envio del formulario genere dos tickets.
+            $idx = $this->db->query("SHOW INDEX FROM tickets WHERE Key_name = 'uniq_creation_token'")->fetch();
+            if (!$idx) {
+                $this->db->exec("ALTER TABLE tickets ADD UNIQUE KEY uniq_creation_token (creation_token)");
             }
         } catch (Exception $e) {
             // Ignorar si ya existe
@@ -451,15 +798,36 @@ class SharePointService {
         $created = 0;
         $updated = 0;
 
-        $stmtCheck = $this->db->prepare("SELECT id FROM tickets WHERE sharepoint_id = :sp_id LIMIT 1");
+        // Si la columna del solicitante esta mapeada, su valor se trae de SharePoint;
+        // si no, NO se toca la columna local (el dato lo gestiona solo el sistema).
+        $spFieldReqBy = $this->fieldRequestedBy;
+        $syncRequestedBy = ($spFieldReqBy !== '');
+        $requestedByNotice = '';
+
+        // Una columna de tipo Persona guarda un LookupId, no un nombre. Si no se
+        // puede resolver ese identificador contra los usuarios del sitio, traerlo
+        // solo serviria para ensuciar o vaciar el dato local: mejor no sincronizarlo.
+        if ($syncRequestedBy && $this->requestedByIsPersonField()) {
+            $syncRequestedBy = false;
+            $requestedByNotice = " La columna \"{$spFieldReqBy}\" es de tipo Persona:"
+                . " el solicitante se mantiene solo en el sistema y la sincronizacion no lo modifica.";
+        }
+
+        $stmtCheck = $this->db->prepare("SELECT id, created_at FROM tickets WHERE sharepoint_id = :sp_id LIMIT 1");
+        $insertReqByCol = $syncRequestedBy ? 'requested_by, ' : '';
+        $insertReqByVal = $syncRequestedBy ? ':requested_by, ' : '';
+        // COALESCE protege el dato local: si :requested_by llega null (SharePoint
+        // no aporta un nombre utilizable), la columna conserva su valor actual.
+        $updateReqBySet = $syncRequestedBy ? 'requested_by = COALESCE(:requested_by, requested_by),' : '';
+
         $stmtInsert = $this->db->prepare("
             INSERT INTO tickets (
-                sharepoint_id, code, title, company_name, area_code, responsable,
+                sharepoint_id, code, title, company_name, {$insertReqByCol}sp_created_by, sp_created_by_email, area_code, responsable,
                 observations, sp_status, description, priority, 
                 status_id, area_id, requester_id, assigned_agent_id, 
                 due_date, resolved_at, created_at
             ) VALUES (
-                :sp_id, :code, :title, :company_name, :area_code, :responsable,
+                :sp_id, :code, :title, :company_name, {$insertReqByVal}:sp_created_by, :sp_created_by_email, :area_code, :responsable,
                 :observations, :sp_status, :description, :priority,
                 :status_id, :area_id, :requester_id, :assigned_agent_id,
                 :due_date, :resolved_at, :created_at
@@ -470,15 +838,18 @@ class SharePointService {
             UPDATE tickets SET 
                 title = :title,
                 company_name = :company_name,
+                {$updateReqBySet}
+                sp_created_by = :sp_created_by,
+                sp_created_by_email = :sp_created_by_email,
                 area_code = :area_code,
-                responsable = :responsable,
+                responsable = COALESCE(:responsable, responsable),
                 observations = :observations,
                 sp_status = :sp_status,
                 description = :description,
                 status_id = :status_id,
                 area_id = :area_id,
                 requester_id = :requester_id,
-                assigned_agent_id = :assigned_agent_id,
+                assigned_agent_id = COALESCE(:assigned_agent_id, assigned_agent_id),
                 due_date = :due_date,
                 resolved_at = :resolved_at,
                 created_at = :created_at
@@ -489,6 +860,12 @@ class SharePointService {
             $spId = (int)$item['id'];
             $fields = $item['fields'] ?? [];
 
+            // Registro local previo (si existe): necesario para NO perder la hora de
+            // solicitud ya registrada en el sistema cuando SharePoint no la aporta.
+            $stmtCheck->execute([':sp_id' => $spId]);
+            $exists = $stmtCheck->fetch();
+            $localCreatedAt = $exists['created_at'] ?? null;
+
             $title = $this->cleanUtf8(trim($fields['Title'] ?? 'Solicitud sin título'));
             if (mb_strlen($title) > 255) {
                 $title = mb_substr($title, 0, 252) . '...';
@@ -498,6 +875,14 @@ class SharePointService {
             $areaStr = strtoupper(trim($fields['field_1'] ?? ''));
             $responsable = $this->cleanUtf8(trim($fields['field_2'] ?? ''));
             $observaciones = $this->cleanUtf8(trim($fields['field_4'] ?? ''));
+            // Quien cargo la solicitud en SharePoint (viene ya resuelto en el lote)
+            $autorSp = $this->extractItemAuthor($item);
+
+            $solicitanteSp = $syncRequestedBy
+                ? $this->cleanUtf8($this->extractRequestedByValue(
+                    $fields[$spFieldReqBy] ?? ($fields[$spFieldReqBy . 'LookupId'] ?? '')
+                  ))
+                : '';
             $estatusStr = trim($fields['field_5'] ?? '');
 
             // 1. Mapeo de Área
@@ -536,38 +921,73 @@ class SharePointService {
                 ? implode("\n\n", $descriptionParts) 
                 : "Solicitud originada en SharePoint #{$spId}";
 
-            // 4. Fechas (Evitar horas en cero preservando la hora real de creación del elemento en SharePoint y sin desplazamiento UTC de fecha)
+            // 4. FECHA Y HORA DE SOLICITUD
+            // La hora de la solicitud es un dato del negocio: la escribe el sistema en
+            // field_6 y NO debe reemplazarse por la hora de creación del elemento en
+            // SharePoint. Antes se tomaba sólo la fecha de field_6 y la hora se
+            // sobrescribía con createdDateTime, por lo que cualquier sincronización
+            // posterior a una edición borraba la hora registrada por el usuario.
             $spCreated = !empty($item['createdDateTime']) ? $item['createdDateTime'] : ($fields['Created'] ?? null);
-            if (!empty($spCreated)) {
-                $spCreatedTs = strtotime($spCreated);
-                $timePart = date('H:i:s', $spCreatedTs);
-                $createdDate = date('Y-m-d', $spCreatedTs);
+            $rawField6 = isset($fields['field_6']) ? trim((string)$fields['field_6']) : '';
 
-                if (!empty($fields['field_6'])) {
-                    $rawField6Date = substr($fields['field_6'], 0, 10);
-                    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawField6Date)) {
-                        $createdAt = "{$rawField6Date} {$timePart}";
-                    } else {
-                        $createdAt = "{$createdDate} {$timePart}";
-                    }
-                } else {
-                    $createdAt = "{$createdDate} {$timePart}";
-                }
-            } else {
-                $rawField6Date = !empty($fields['field_6']) ? substr($fields['field_6'], 0, 10) : '';
-                if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $rawField6Date)) {
-                    $createdAt = "{$rawField6Date} " . date('H:i:s');
-                } else {
-                    $createdAt = date('Y-m-d H:i:s');
-                }
+            // Fecha (YYYY-MM-DD) tal como viene en field_6, sin desplazamiento UTC
+            $field6Date = '';
+            if ($rawField6 !== '' && preg_match('/^(\d{4}-\d{2}-\d{2})/', $rawField6, $mDate6)) {
+                $field6Date = $mDate6[1];
             }
 
-            if (str_ends_with($createdAt, '00:00:00')) {
-                $fixTime = !empty($spCreated) ? date('H:i:s', strtotime($spCreated)) : date('H:i:s');
-                if ($fixTime === '00:00:00') {
-                    $fixTime = '08:00:00';
+            // Una columna de SOLO FECHA llega siempre en punto (00:00:00Z, u 08:00:00Z
+            // si el sitio esta en otra zona horaria). Solo se considera hora real la
+            // que trae minutos o segundos, que es la que escribe esta aplicacion.
+            $field6HasRealTime = ($rawField6 !== ''
+                && preg_match('/T(\d{2}:\d{2}:\d{2})/', $rawField6, $mTime6)
+                && $this->esHoraReal($mTime6[1]));
+
+            if ($field6HasRealTime) {
+                $createdAt = date('Y-m-d H:i:s', strtotime($rawField6));
+            } else {
+                // field_6 no aporta hora: conservar la que ya tiene el registro local.
+                $preservedTime = null;
+
+                // 1) La hora que ya tenga el registro local, si es una hora real.
+                //    Una hora exacta en punto procede de una sincronizacion previa
+                //    y no debe perpetuarse.
+                if (!empty($localCreatedAt)) {
+                    $tsLocal = strtotime($localCreatedAt);
+                    if ($tsLocal) {
+                        $candidate = date('H:i:s', $tsLocal);
+                        if ($this->esHoraReal($candidate)) {
+                            $preservedTime = $candidate;
+                        }
+                    }
                 }
-                $createdAt = substr($createdAt, 0, 10) . ' ' . $fixTime;
+
+                // 2) Si no, la hora en que el elemento se creo en SharePoint:
+                //    es el momento real en que se cargo la solicitud.
+                if ($preservedTime === null && !empty($spCreated)) {
+                    $candidate = date('H:i:s', strtotime($spCreated));
+                    if ($candidate !== '00:00:00') {
+                        $preservedTime = $candidate;
+                    }
+                }
+
+                // 3) Ultimo recurso: inicio de jornada.
+                if ($preservedTime === null) {
+                    $preservedTime = '08:00:00';
+                }
+
+                $baseDate = $field6Date;
+                if ($baseDate === '') {
+                    if (!empty($localCreatedAt)) {
+                        $baseDate = date('Y-m-d', strtotime($localCreatedAt));
+                    } elseif (!empty($spCreated)) {
+                        $baseDate = date('Y-m-d', strtotime($spCreated));
+                    } else {
+                        $baseDate = date('Y-m-d');
+                    }
+                }
+
+                $createdAt = "{$baseDate} {$preservedTime}";
             }
 
             $dueDate = null;
@@ -682,17 +1102,37 @@ class SharePointService {
             $requesterId = $companyUserCache[$companyName] ?? 8;
             $priority = 'medium';
 
-            // Ejecución UPSERT
-            $stmtCheck->execute([':sp_id' => $spId]);
-            $exists = $stmtCheck->fetch();
-
+            // Ejecución UPSERT ($exists ya se resolvió al inicio de la iteración)
             $compNameClean = !empty($empresa) ? $empresa : 'Empresa General';
             $areaCodeClean = !empty($areaStr) ? $areaStr : ($areaId === 3 ? 'SSGG' : 'IT');
-            $responsableClean = !empty($responsable) ? $responsable : 'Sin Asignar';
+            // Un responsable vacio en SharePoint NO equivale a desasignar: puede ser
+            // que la asignacion se hiciera desde esta aplicacion y aun no viaje a
+            // SharePoint. Se pasa null para que COALESCE conserve el valor local.
+            $responsableSp = trim((string)$responsable);
+            $responsableEsReal = ($responsableSp !== '' && strcasecmp($responsableSp, 'Sin Asignar') !== 0);
+            $responsableClean = $responsableEsReal ? $responsableSp : null;
+
+            // Si SharePoint no aporta responsable, tampoco se toca el agente local.
+            if (!$responsableEsReal) {
+                $assignedAgentId = null;
+            }
             $spStatusClean = !empty($estatusStr) ? $estatusStr : 'Pendiente';
 
+            // Solo se acepta un nombre real. Un valor vacio o puramente numerico
+            // (un LookupId sin resolver) se descarta pasando null, de modo que el
+            // solicitante guardado en el sistema queda intacto.
+            $solicitanteUsable = ($solicitanteSp !== '' && !ctype_digit($solicitanteSp));
+            $reqByParam = $syncRequestedBy
+                ? [':requested_by' => ($solicitanteUsable ? $solicitanteSp : null)]
+                : [];
+
+            $autorParam = [
+                ':sp_created_by'       => $autorSp['name'],
+                ':sp_created_by_email' => $autorSp['email'],
+            ];
+
             if ($exists) {
-                $stmtUpdate->execute([
+                $stmtUpdate->execute($reqByParam + $autorParam + [
                     ':title'             => $title,
                     ':company_name'      => $compNameClean,
                     ':area_code'         => $areaCodeClean,
@@ -711,7 +1151,7 @@ class SharePointService {
                 ]);
                 $updated++;
             } else {
-                $stmtInsert->execute([
+                $stmtInsert->execute($reqByParam + $autorParam + [
                     ':sp_id'             => $spId,
                     ':code'              => $code,
                     ':title'             => $title,
@@ -735,7 +1175,7 @@ class SharePointService {
             $synced++;
         }
 
-        $message = "Sincronización completada: {$synced} tickets procesados ({$created} nuevos, {$updated} actualizados).";
+        $message = "Sincronización completada: {$synced} tickets procesados ({$created} nuevos, {$updated} actualizados)." . $requestedByNotice;
         if ($synced === 0 && in_array($timeRange, ['1h', '24h', '1w'], true)) {
             $message = "No se encontraron tickets con actividad en el rango seleccionado ({$timeRange}). Sugerencia: utiliza 'Últimos 50 tickets' para sincronizar los registros más recientes.";
         }
@@ -920,6 +1360,12 @@ class SharePointService {
                 'field_5' => trim((string)($data['sp_status'] ?? 'Pendiente'))
             ];
 
+            // Solicitante: solo si la columna esta mapeada explicitamente en el .env.
+            // Soporta columnas de texto y de tipo "Persona o grupo".
+            if ($this->fieldRequestedBy !== '' && !empty($data['requested_by'])) {
+                $fieldsPayload += $this->buildRequestedByPayload((string)$data['requested_by']);
+            }
+
             // Fecha de Solicitud (field_6)
             $reqDate = !empty($data['request_date']) ? strtotime($data['request_date']) : time();
             $fieldsPayload['field_6'] = gmdate('Y-m-d\TH:i:s\Z', $reqDate);
@@ -1000,6 +1446,17 @@ class SharePointService {
      * Actualizar campos de un registro específico en SharePoint mediante Microsoft Graph API PATCH
      */
     public function updateSharePointItem(int $itemId, array $updatedFields): array {
+        // Modo seguro: igual que crear y eliminar, ninguna escritura llega a
+        // produccion mientras SHAREPOINT_DRY_RUN sea "true".
+        $isDryRun = (getenv('SHAREPOINT_DRY_RUN') === 'true') || (!empty($updatedFields['dry_run']));
+        if ($isDryRun) {
+            return [
+                'success' => true,
+                'dry_run' => true,
+                'message' => "[Modo Seguro / Dry-Run] Cambios validados sobre el item #{$itemId} sin modificar SharePoint."
+            ];
+        }
+
         try {
             $token = $this->getAccessToken();
             $listId = $this->getListId($token);
@@ -1018,6 +1475,9 @@ class SharePointService {
             }
             if (isset($updatedFields['responsable'])) {
                 $fieldsPayload['field_2'] = trim((string)$updatedFields['responsable']);
+            }
+            if ($this->fieldRequestedBy !== '' && array_key_exists('requested_by', $updatedFields)) {
+                $fieldsPayload += $this->buildRequestedByPayload((string)$updatedFields['requested_by']);
             }
             if (array_key_exists('observations', $updatedFields)) {
                 $fieldsPayload['field_4'] = (string)$updatedFields['observations'];

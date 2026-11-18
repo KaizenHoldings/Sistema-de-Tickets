@@ -374,7 +374,7 @@ $formattedDate = date('d/m/Y', strtotime($u['created_at']));
                                             <?= htmlspecialchars($t['title']) ?>
                                         </div>
                                         <div class="fd-active-ticket-meta">
-                                            <span>👤 Solicitante: <strong><?= htmlspecialchars($t['requester_name'] ?? 'N/D') ?></strong></span>
+                                            <span>👤 Solicitante: <strong><?= htmlspecialchars(trim($t['requested_by'] ?? '') !== '' ? $t['requested_by'] : (trim($t['sp_created_by'] ?? '') !== '' ? $t['sp_created_by'] : ($t['requester_name'] ?? 'N/D'))) ?></strong></span>
                                             <span>🏢 Empresa: <?= htmlspecialchars($t['company_name'] ?? 'Kaizen') ?></span>
                                             <span>📅 <?= date('d/m/Y H:i', strtotime($t['created_at'])) ?></span>
                                         </div>
